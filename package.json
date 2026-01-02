@@ -1,0 +1,70 @@
+{
+    "name": "stealth-subtitle-translator",
+    "version": "1.0.0",
+    "description": "Real-time, privacy-focused desktop subtitle translation with stealth overlay",
+    "author": "Dogan",
+    "license": "MIT",
+    "main": "dist-electron/main.js",
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "tsc && vite build",
+        "electron:dev": "vite",
+        "electron:build": "npm run build && electron-builder",
+        "python:install": "cd python && /opt/homebrew/opt/python@3.11/bin/python3.11 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt",
+        "python:engine": "source python/.venv/bin/activate && python python/engine.py",
+        "start": "concurrently -k \"npm run electron:dev\" \"sleep 5 && npm run python:engine\"",
+        "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+        "preview": "vite preview"
+    },
+    "dependencies": {
+        "react": "^18.3.1",
+        "react-dom": "^18.3.1",
+        "framer-motion": "^11.15.0",
+        "zeromq": "^6.0.0-beta.20"
+    },
+    "devDependencies": {
+        "@types/react": "^18.3.18",
+        "@types/react-dom": "^18.3.5",
+        "@vitejs/plugin-react": "^4.3.4",
+        "concurrently": "^9.1.2",
+        "electron": "^33.3.0",
+        "electron-builder": "^25.1.8",
+        "typescript": "^5.7.2",
+        "vite": "^6.0.6",
+        "vite-plugin-electron": "^0.28.8",
+        "vite-plugin-electron-renderer": "^0.14.6",
+        "wait-on": "^8.0.2"
+    },
+    "build": {
+        "appId": "com.stealth.subtitle.translator",
+        "productName": "Stealth Subtitle Translator",
+        "mac": {
+            "category": "public.app-category.productivity",
+            "target": [
+                "dmg"
+            ],
+            "hardenedRuntime": true,
+            "gatekeeperAssess": false,
+            "entitlements": "build/entitlements.mac.plist",
+            "entitlementsInherit": "build/entitlements.mac.plist",
+            "extendInfo": {
+                "NSMicrophoneUsageDescription": "This app needs access to system audio for transcription."
+            }
+        },
+        "files": [
+            "dist/**/*",
+            "dist-electron/**/*",
+            "python/**/*"
+        ],
+        "extraResources": [
+            {
+                "from": "python",
+                "to": "python",
+                "filter": [
+                    "**/*"
+                ]
+            }
+        ]
+    }
+}

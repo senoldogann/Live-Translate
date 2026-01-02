@@ -1,0 +1,36 @@
+# Stealth Subtitle Translator - Python Dependencies
+# Python 3.11+ required
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CORE AI
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Faster-Whisper: CTranslate2 optimized Whisper implementation
+faster-whisper>=1.0.0
+
+# ArgosTranslate: Offline neural machine translation
+argostranslate>=1.9.0
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AUDIO
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Sounddevice: Modern audio I/O with portaudio
+sounddevice>=0.4.0
+
+# WebRTC VAD: Voice Activity Detection from Google
+webrtcvad>=2.0.10
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# IPC
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# PyZMQ: ZeroMQ bindings for Python
+pyzmq>=25.0.0
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# UTILITIES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# NumPy: Numerical computing (audio buffers)
+numpy>=1.24.0
