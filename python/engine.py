@@ -577,7 +577,9 @@ class ZmqPublisher:
             print("[ZMQ] pyzmq not available, using stdout fallback")
             self.socket = None
         except Exception as e:
-            print(f"[ZMQ] Failed to start: {e}")
+            print(f"[ZMQ] Critical Error - Failed to start: {e}")
+            print(f"[ZMQ] Please check if another instance of the app is running.")
+            sys.exit(1) # Fail fast to prevent zombie process
             self.socket = None
     
     def publish(self, result):

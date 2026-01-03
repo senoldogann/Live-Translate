@@ -19,6 +19,7 @@ interface AppInfo {
 interface ElectronAPI {
     onTranscriptUpdate: (callback: (data: TranscriptData) => void) => () => void;
     onAudioLevel: (callback: (level: number) => void) => () => void;
+    onEngineReady?: (callback: () => void) => () => void;
     updateInteractiveZones: (zones: Array<{ x: number, y: number, width: number, height: number }>) => void;
     setIgnoreMouseEvents: (ignore: boolean, options?: { forward: boolean }) => void;
     moveWindow: (deltaX: number, deltaY: number) => void;

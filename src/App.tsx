@@ -127,11 +127,23 @@ function App() {
             setAudioLevel(scaledLevel);
         });
 
+        // Engine Ready Listener (For Restart Persistence)
+        const unsubscribeEngine = window.electronAPI.onEngineReady?.(() => {
+            console.log('[App] Engine restarted. Restoring state...');
+            // Restore Language
+            window.electronAPI?.setLanguage(language);
+            // Restore Streaming Mode
+            window.electronAPI?.setStreamingMode(isStreaming);
+            // Restore Stealth Mode
+            window.electronAPI?.toggleStealth(isStealthMode);
+        });
+
         return () => {
             unsubscribe();
             unsubscribeAudio();
+            unsubscribeEngine?.();
         };
-    }, []);
+    }, [language, isStreaming, isStealthMode]); // Add dependencies to closure runs with latest state
 
     // Toggle stealth mode
     const handleToggleStealth = useCallback(() => {

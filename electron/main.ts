@@ -163,11 +163,16 @@ function startPythonEngine(): ChildProcess | null {
                             // Send to renderer
                             if (mainWindow && !mainWindow.isDestroyed()) {
                                 mainWindow.webContents.send('transcript-update', transcriptData);
-                                console.log('[Main] Sent transcript to renderer:', transcriptData.translated);
+                                // console.log('[Main] Sent transcript to renderer:', transcriptData.translated);
                             }
                         }
                     } catch (parseError) {
                         // Not valid JSON, ignore
+                    }
+                } else if (line.includes('[Engine] Started successfully')) {
+                    console.log('[Main] Python engine ready signal detected');
+                    if (mainWindow && !mainWindow.isDestroyed()) {
+                        mainWindow.webContents.send('engine-ready');
                     }
                 }
             }

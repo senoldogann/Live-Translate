@@ -21,10 +21,10 @@ interface TranscriptHistoryProps {
 }
 
 function formatTime(timestamp: number): string {
-    const date = new Date(timestamp); // Input is already in milliseconds from Date.now()
+    const date = new Date(timestamp * 1000);
+    const hours = date.getHours().toString().padStart(2, '0');
     const minutes = date.getMinutes().toString().padStart(2, '0');
-    const seconds = date.getSeconds().toString().padStart(2, '0');
-    return `${minutes}:${seconds}`;
+    return `${hours}:${minutes}`;
 }
 
 function TranscriptHistory({ isOpen, transcripts, onClose }: TranscriptHistoryProps) {

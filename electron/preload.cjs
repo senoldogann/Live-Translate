@@ -31,6 +31,16 @@ const electronAPI = {
         };
     },
 
+    onEngineReady: (callback) => {
+        const handler = () => {
+            callback();
+        };
+        ipcRenderer.on('engine-ready', handler);
+        return () => {
+            ipcRenderer.removeListener('engine-ready', handler);
+        };
+    },
+
     // ═══════════════════════════════════════════════════════════════
     // Mouse/Interaction
     // ═══════════════════════════════════════════════════════════════
