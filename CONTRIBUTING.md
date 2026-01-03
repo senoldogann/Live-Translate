@@ -20,7 +20,9 @@ Lütfen tüm etkileşimlerde saygılı ve profesyonel olun. Ayrımcılığa, tac
     npm install
     npm run python:install
     ```
-4.  **Coding:**
+4.  **Environment:**
+    *   `.env` dosyasını oluşturun ve `DEEPL_API_KEY` ekleyin (Varsa).
+5.  **Coding:**
     *   **TypeScript:** Strict mode aktiftir. `any` kullanmaktan kaçının.
     *   **React:** Functional component ve Hook kullanın.
     *   **Style:** Glassmorphism tasarım diline sadık kalın.

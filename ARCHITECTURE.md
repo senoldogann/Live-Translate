@@ -44,18 +44,25 @@ graph TB
 Tüm yapay zeka işlemleri `python/engine.py` içinde, Electron ana sürecinden bağımsız bir *child process* olarak çalışır.
 
 ### Teknoloji Yığını
-*   **STT Engine:** `faster-whisper` (CTranslate2 backend). OpenAI'nin Whisper modelinin optimize edilmiş halidir. Apple Silicon üzerinde `int8` quantization ile çalışarak ~%300 performans artışı sağlar.
-*   **VAD (Voice Activity Detection):** `webrtcvad` tabanlı özel bir wrapper. Sessizlik anlarında Whisper'ı çalıştırmayarak CPU tasarrufu (Idle durumunda %1 kullanım) sağlar.
-*   **Translation:** Hibrit Çeviri Sistemi.
-    *   *Primary:* Google Translate (Private API wrapper).
-    *   *Fallback:* Argos Translate (Offline NMT).
+*   **STT Engine:** `faster-whisper` (CTranslate2 backend). Medium Model varsayılan olarak seçilmiştir. Apple Silicon üzerinde `int8` quantization ile çalışır.
+*   **VAD (Voice Activity Detection):** `webrtcvad`. Sessizlik eşiği 400ms'ye indirilerek daha tepkisel hale getirilmiştir.
+*   **Translation Layer:**
+    *   *Tier 1 (Premium):* DeepL API. Fince gibi zor diller ve yüksek kalite için önceliklidir.
+    *   *Tier 2 (Standard):* Google Translate. DeepL kotası biterse veya hata verirse devreye girer.
+    *   *Tier 3 (Offline):* Argos Translate. İnternet kesilirse son çare olarak çalışır.
+*   **Logic Controllers:**
+    *   *Anti-Loop Filter:* Whisper'ın halüsinasyonlarını (sonsuz döngüleri) tespit edip temizleyen 3-gram filtresi.
+    *   *Latency Optimizer:* Buffer sürelerini dinamik yöneterek (Max 5s) gecikmeyi minimize eder.
 
-### Threading Model
-UI bloklanmasını önlemek için Python tarafında **Producer-Consumer** modeli uygulanmıştır:
-1.  `_audio_thread`: BlackHole'dan ham ses verisini (PCM) okur ve `queue`'ya atar.
-2.  `_process_thread`: Kuyruktan veriyi alır, VAD kontrolü yapar ve Whisper'a gönderir.
+### Modes & Threading
+İki farklı çalışma modu mevcuttur:
+1.  **Fast Mode (Streaming):** `0.05s` aralıkla kelime kelime yayın yapar. Gecikme minimumdur.
+2.  **Stable Mode (Strict):** Sadece `is_final=True` (cümle bitti) sinyali gelince yayın yapar. Yarım cümleleri asla göstermez.
 
----
+Threading Model:
+1.  `_audio_thread`: BlackHole'dan ham ses verisini okur.
+2.  `_process_thread`: VAD, STT ve Çeviri işlemlerini yoğun işlemci gücüyle yönetir.
+
 
 ## ⚡ 2. IPC & Communication (ZeroMQ)
 
