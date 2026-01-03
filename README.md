@@ -132,5 +132,5 @@ Bu yazılım **eğitim ve erişilebilirlik** amaçlı geliştirilmiştir. İzins
 ---
 
 <div align="center">
-  <sub>Designed & Engineered by <a href="https://github.com/senoldogann">Senol Dogan</a> in Istanbul.</sub>
+  <sub>Designed & Engineered by <a href="https://github.com/senoldogann">Senol Dogan</a> in Finland.</sub>
 </div>
