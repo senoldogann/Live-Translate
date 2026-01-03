@@ -28,6 +28,7 @@ interface ElectronAPI {
     forceFocus: () => void;
     restartEngine: () => void;
     toggleStealth: (enabled: boolean) => void;
+    setLanguage: (lang: string) => void;
     quitApp: () => void;
     getAppInfo: () => Promise<AppInfo>;
 }

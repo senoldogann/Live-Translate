@@ -21,7 +21,7 @@ interface TranscriptHistoryProps {
 }
 
 function formatTime(timestamp: number): string {
-    const date = new Date(timestamp * 1000); // Unix timestamp
+    const date = new Date(timestamp); // Input is already in milliseconds from Date.now()
     const minutes = date.getMinutes().toString().padStart(2, '0');
     const seconds = date.getSeconds().toString().padStart(2, '0');
     return `${minutes}:${seconds}`;

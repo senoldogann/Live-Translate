@@ -46,6 +46,7 @@ function App() {
     const [showOriginal, setShowOriginal] = useState(true);
     const [opacity, setOpacity] = useState(0.9);
     const [fontSize, setFontSize] = useState(18);
+    const [language, setLanguage] = useState<'en' | 'fi'>('en'); // Source language
     // Audio Level for SiriWave
     const [audioLevel, setAudioLevel] = useState(0);
 
@@ -176,6 +177,15 @@ function App() {
         });
     }, []);
 
+    // Handle language change
+    const handleLanguageChange = useCallback((lang: 'en' | 'fi') => {
+        console.log('[App] handleLanguageChange called:', lang);
+        console.log('[App] electronAPI available:', !!window.electronAPI);
+        console.log('[App] setLanguage function:', typeof window.electronAPI?.setLanguage);
+        setLanguage(lang);
+        window.electronAPI?.setLanguage(lang);
+    }, []);
+
     // Refs for interaction detection
     const bottomSectionRef = useRef<HTMLDivElement>(null); // ControlBar wrapper
     const restoreBtnRef = useRef<HTMLButtonElement>(null);
@@ -299,6 +309,8 @@ function App() {
                     onQuit={() => window.electronAPI?.quitApp()}
                     isStreaming={isStreaming}
                     onToggleStreaming={handleToggleStreaming}
+                    language={language}
+                    onLanguageChange={handleLanguageChange}
                 />
             </motion.div>
 

@@ -58,6 +58,8 @@ interface ElectronAPI {
     toggleStealth: (enabled: boolean) => void;
     // NEW: Streaming Mode
     setStreamingMode: (enabled: boolean) => void;
+    // NEW: Language Selection
+    setLanguage: (lang: string) => void;
 
     // App info
     getAppInfo: () => Promise<AppInfo>;
@@ -135,6 +137,11 @@ const electronAPI: ElectronAPI = {
 
     setStreamingMode: (enabled: boolean) => {
         ipcRenderer.send('set-streaming-mode', enabled);
+    },
+
+    setLanguage: (lang: string) => {
+        console.log('[Preload] setLanguage called with:', lang);
+        ipcRenderer.send('set-language', lang);
     },
 
     // ═══════════════════════════════════════════════════════════════

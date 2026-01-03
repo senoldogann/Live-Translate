@@ -25,7 +25,8 @@ let zmqSubscriber: any = null;
 let commandSock: any = null; // ZMQ Publisher (Streaming komutları için)
 let interactiveZones: { x: number, y: number, width: number, height: number }[] = [];
 let interactionPollingInterval: NodeJS.Timeout | null = null;
-let isInteractionEnabled = true; // Başlangıçta etkileşim açık olsun
+let isInteractionEnabled = true; // Start with interaction ENABLED (clickable)
+let hasReceivedZones = false; // Track if zones have been received at least once
 
 // Environment
 const isDev = process.env.NODE_ENV !== 'production';
@@ -49,10 +50,10 @@ function createStealthWindow(): BrowserWindow {
     // const yPosition = screenHeight - windowHeight - 30; // ESKİ: Alt kısım
     const yPosition = Math.floor((screenHeight - windowHeight) / 2); // YENİ: Tam orta
 
-    // Debug: preload path - CJS dosyasını kullan (ESM değil)
+    // Debug: preload path - Use manual CJS file to bypass Vite's ESM conversion
     const preloadPath = isDev
         ? path.join(process.cwd(), 'electron', 'preload.cjs')
-        : path.join(__dirname, 'preload.cjs');
+        : path.join(__dirname, '..', 'electron', 'preload.cjs');
     console.log('[Main] Preload path:', preloadPath);
 
     const win = new BrowserWindow({
@@ -110,6 +111,11 @@ function createStealthWindow(): BrowserWindow {
     // Window level ayarı (screen-saver en üst seviyedir)
     win.setAlwaysOnTop(true, 'screen-saver', 1);
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+
+    // DevTools - development modunda otomatik aç
+    if (isDev) {
+        win.webContents.openDevTools({ mode: 'detach' });
+    }
 
 
     return win;
@@ -269,6 +275,9 @@ function startInteractionPolling() {
     interactionPollingInterval = setInterval(() => {
         if (!mainWindow || mainWindow.isDestroyed()) return;
 
+        // Don't do anything until we've received zones at least once
+        if (!hasReceivedZones) return;
+
         const cursor = screen.getCursorScreenPoint();
         const [winX, winY] = mainWindow.getPosition();
 
@@ -303,7 +312,7 @@ function startInteractionPolling() {
             isInteractionEnabled = shouldEnable;
         }
 
-    }, 50); // 50ms polling rate (Smooth enough)
+    }, 100); // 100ms polling rate - reduced from 50ms to prevent mouse freeze
 }
 
 /**
@@ -313,6 +322,10 @@ function setupIpcHandlers(): void {
     // Interactive Zones Update
     ipcMain.on('update-interactive-zones', (_event, zones) => {
         interactiveZones = zones;
+        if (!hasReceivedZones && zones.length > 0) {
+            hasReceivedZones = true;
+            console.log('[Main] First zones received, polling now active');
+        }
     });
 
     // Mouse olaylarını yönet (drag için)
@@ -370,6 +383,27 @@ function setupIpcHandlers(): void {
                 key: 'streaming_mode',
                 value: enabled
             })).catch((err: any) => console.error('Failed to send config:', err));
+        }
+    });
+
+    // Language Change (Dynamic) - with retry for ZMQ slow joiner
+    ipcMain.on('set-language', async (_event, lang: string) => {
+        console.log(`[Main] Set language: ${lang}`);
+        if (commandSock) {
+            // Send 3 times with delay to ensure delivery (ZMQ slow joiner fix)
+            for (let i = 0; i < 3; i++) {
+                try {
+                    await commandSock.send(JSON.stringify({
+                        type: 'config',
+                        key: 'source_lang',
+                        value: lang
+                    }));
+                    if (i === 0) console.log(`[Main] Language command sent (attempt ${i + 1})`);
+                } catch (err) {
+                    console.error('Failed to send config:', err);
+                }
+                await new Promise(r => setTimeout(r, 100));
+            }
         }
     });
 
@@ -465,6 +499,15 @@ app.whenReady().then(async () => {
 
 // macOS: Tüm pencereler kapandığında çık
 app.on('window-all-closed', () => {
+    // Reset click-through before quitting
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        try {
+            mainWindow.setIgnoreMouseEvents(false);
+        } catch (e) {
+            // Ignore
+        }
+    }
+
     if (process.platform !== 'darwin') {
         app.quit();
     }
@@ -480,6 +523,16 @@ app.on('activate', () => {
 // Cleanup
 app.on('before-quit', () => {
     console.log('[Main] Cleaning up...');
+
+    // CRITICAL: Reset click-through to prevent stuck mouse state
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        try {
+            mainWindow.setIgnoreMouseEvents(false);
+            console.log('[Main] Click-through disabled');
+        } catch (e) {
+            // Ignore if window is already destroyed
+        }
+    }
 
     if (interactionPollingInterval) {
         clearInterval(interactionPollingInterval);

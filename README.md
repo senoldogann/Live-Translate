@@ -21,14 +21,15 @@ macOS'un çekirdek seviyesindeki `NSWindowSharingNone` API'sini kullanarak pence
 
 ### ⚡ Hybrid Core Architecture
 Hibrit mimarimiz, Electron'un görsel gücünü Python'un yapay zeka kaslarıyla birleştirir.
-- **Engine:** OpenAI `faster-whisper` (Int8 Quantization) ile milisaniyelik transkripsiyon.
-- **Translation:** Google Translate + Offline Argos Fallback ile kesintisiz Türkçe çeviri.
+- **Engine:** OpenAI `faster-whisper` (Medium Model) ile yüksek doğruluklu transkripsiyon.
+- **Translation:** DeepL API (Öncelikli) + Google Translate (Fallback) + Argos Offline.
+- **Anti-Hallucination:** "Loop" engelleme filtresi ve sıcaklık (temperature) fallback mekanizması.
 - **IPC:** ZeroMQ (ZMQ) üzerinden <5ms gecikmeli veri akışı.
 
 ### 💎 Premium User Experience
 - **Glassmorphism UI:** macOS Big Sur+ estetiğine uygun, şeffaf ve blurlu arayüz.
-- **Interactive Zones:** Tıklanabilir alanları dinamik yöneten akıllı overlay. Transkriptlerin arkasındaki pencerelere tıklayabilirsiniz.
-- **Voice Activity Detection (VAD):** Silencio VAD motoru ile sadece konuşma anında işlem yapar, CPU'yu yormaz.
+- **Interactive Zones:** Tıklanabilir alanları dinamik yöneten akıllı overlay.
+- **Voice Activity Detection (VAD):** Silencio VAD motoru (0.4s hassasiyet) ile anlık cümle kesimi.
 
 ---
 
@@ -39,15 +40,14 @@ Detaylı teknik inceleme için [ARCHITECTURE.md](ARCHITECTURE.md) dosyasını in
 ```mermaid
 graph TD
     User[Kullanıcı Konuşması] -->|BlackHole 2ch| PyCore[Python AI Core]
-    PyCore -->|VAD - Konuşma Tespiti| Whisper[Faster-Whisper STT]
-    Whisper -->|Text| Translate[Google/Argos Translate]
-    Translate -->|ZMQ Pub| Electron[Electron Main Process]
-    Electron -->|IPC Bridge| React[React Renderer UI]
-    React -->|Overlay| Display[Kullanıcı Ekranı]
-    
-    subgraph Stealth Layer
-    Electron --o SetContentProtection=True --> Display
-    end
+    PyCore -->|VAD| Whisper[Faster-Whisper (Medium)]
+    Whisper -->|Loop Filter| PostProcess[Metin Temizleme]
+    PostProcess -->|Text| Router{Dil Kontrolü}
+    Router -->|Fince| Google[Google Translate]
+    Router -->|Diğer| DeepL[DeepL API]
+    DeepL -->|Hata/Limit| Google
+    Google -->|Sonuç| Electron[Electron Main Process]
+    Electron -->|IPC| React[React Renderer UI]
 ```
 
 ---
@@ -55,9 +55,10 @@ graph TD
 ## 🚀 Hızlı Kurulum
 
 ### Ön Gereksinimler
-*   **Donanım:** Apple Silicon (M1/M2/M3) önerilir.
+*   **Donanım:** Apple Silicon (M1/M2/M3/M4) önerilir. (Medium model için 8GB+ RAM).
 *   **OS:** macOS Monterey (12.0) veya üstü.
 *   **Sürücü:** [BlackHole 2ch](https://existential.audio/blackhole/) (Ses yakalama için zorunlu).
+*   **API Key:** DeepL Free API Key (Opsiyonel ama önerilir).
 
 ```bash
 brew install blackhole-2ch
@@ -74,18 +75,20 @@ brew install python@3.11
 
 2.  **Bağımlılıkları Yükleyin (Full Stack):**
     ```bash
-    # Node.js Paketleri
     npm install
-
-    # Python AI Motoru
     npm run python:install
     ```
 
-3.  **Uygulamayı Başlatın:**
+3.  **Çevresel Değişkenler (.env):**
+    Proje ana dizininde `.env` dosyası oluşturun:
+    ```env
+    DEEPL_API_KEY=senin-deepl-api-anahtarin:fx
+    ```
+
+4.  **Uygulamayı Başlatın:**
     ```bash
     npm start
     ```
-    *Bu komut hem Electron arayüzünü hem de Python motorunu eşzamanlı başlatır.*
 
 ---
 
@@ -97,10 +100,11 @@ Arayüz üzerindeki **Control Bar** sayesinde tüm deneyimi yönetebilirsiniz:
 | :--- | :--- | :--- |
 | **🎤** | **Listening** | Transkripsiyonu başlatır/durdurur. |
 | **🛡️** | **Stealth Mode** | Ekran paylaşımında gizliliği açar/kapatır. (Turuncu = Görünür) |
-| **⚡** | **Stream Mode** | **Kelime Modu** (Hızlı) veya **Cümle Modu** (Stabil) arasında geçiş yapar. |
+| **⚡** | **Hızlı Mod** | **Kelime Modu:** Anlık akar, gecikme yoktur (<1s). |
+| **🐢** | **Stabil Mod** | **Cümle Modu:** Sadece cümle bitince gösterir, %100 temizdir (3-5s gecikmeli). |
 | **👁️** | **Original** | Orijinal İngilizce metni gizler/gösterir. |
 | **🔄** | **Restart** | AI motorunu takılırsa yeniden başlatır. |
-| **📜** | **History** | Geçmiş konuşmaların dökümünü açar. |
+| **📜** | **History** | Geçmiş konuşmaların dökümünü açar (zaman damgalı). |
 
 ---
 

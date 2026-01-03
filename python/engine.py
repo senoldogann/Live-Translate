@@ -23,10 +23,16 @@ import time
 import json
 import signal
 import threading
+import os
+import requests
 from typing import Optional, Callable
 from dataclasses import dataclass, asdict
 from collections import deque
 from pathlib import Path
+
+# Load environment variables
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent.parent / '.env')
 
 import numpy as np
 import sounddevice as sd
@@ -59,7 +65,7 @@ class EngineConfig:
     whisper_model: str = "small"  # tiny, base, small, medium, large-v3
     whisper_device: str = "cpu"   # cpu veya mps (experimental)
     whisper_compute_type: str = "int8"  # int8, float16, float32
-    whisper_language: str = "en"  # Source language
+    whisper_language: str = "auto"  # Auto-detect mode (None for Whisper)
     
     # VAD settings
     vad_mode: int = 3  # 0-3, higher = more aggressive
@@ -275,8 +281,13 @@ class TranscriptionEngine:
         self.language = language
         self.model = None
         
-    def load(self):
+    def load(self, model_name: str = None):
         """Load the Whisper model (lazy loading)"""
+        if model_name:
+            if self.model_name != model_name:
+                self.model = None # Force reload
+            self.model_name = model_name
+
         if self.model is not None:
             return
         
@@ -302,29 +313,36 @@ class TranscriptionEngine:
             print(f"[Whisper] Failed to load model: {e}")
             raise
     
-    def transcribe(self, audio: np.ndarray, sample_rate: int = 16000, prompt: str = "") -> tuple[str, float]:
+    def transcribe(self, audio: np.ndarray, sample_rate: int = 16000, prompt: str = "") -> tuple[str, float, str]:
         """
-        Transcribe audio to text.
-        Returns (text, confidence)
+        Transcribe audio to text with language detection.
+        Returns (text, confidence, detected_language)
         """
         if self.model is None:
             self.load()
         
         try:
+            # Use None for auto-detection, or specific language if set
+            lang_param = None if self.language == "auto" else self.language
+            
             segments, info = self.model.transcribe(
                 audio,
-                language=self.language,
+                language=lang_param,  # None = auto-detect
                 beam_size=5,
                 best_of=5,
-                temperature=0.0,
+                # Fix: Use temperature fallback to prevent loops (hallucinations)
+                temperature=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
                 condition_on_previous_text=False,
                 initial_prompt=prompt,  # <--- Context Awareness
                 vad_filter=True,  # Built-in VAD
                 vad_parameters=dict(
-                    min_silence_duration_ms=500,
+                    min_silence_duration_ms=400, # Lowered from 500 for faster cuts
                     speech_pad_ms=400,
                 )
             )
+            
+            # Get detected language from info
+            detected_lang = info.language if info.language else "unknown"
             
             # Collect all segments
             text_parts = []
@@ -337,49 +355,110 @@ class TranscriptionEngine:
                 segment_count += 1
             
             text = " ".join(text_parts)
+            
+            # Anti-Loop Filter: Remove repeated phrases (e.g. "on and on and on")
+            if len(text) > 10:
+                words = text.split()
+                if len(words) > 8:
+                    # Check for 3-gram repetition
+                    last_3 = words[-3:]
+                    prev_3 = words[-6:-3]
+                    if last_3 == prev_3:
+                        # Repetition detected!
+                        text = " ".join(words[:-3])
+            
             avg_confidence = (total_confidence / segment_count) if segment_count > 0 else 0.0
             
-            return text, avg_confidence
+            return text, avg_confidence, detected_lang
             
         except Exception as e:
             print(f"[Whisper] Transcription error: {e}")
-            return "", 0.0
+            return "", 0.0, "unknown"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TRANSLATION ENGINE
+# DEEPL TRANSLATOR
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class DeepLTranslator:
+    """
+    DeepL API Client for high-quality translation.
+    Uses Free API endpoint (api-free.deepl.com) when key ends with :fx
+    """
+    
+    def __init__(self, source_lang: str = "en", target_lang: str = "tr"):
+        self.api_key = os.getenv("DEEPL_API_KEY", "")
+        # Detect Free vs Pro based on key suffix
+        self.base_url = "https://api-free.deepl.com" if self.api_key.endswith(":fx") else "https://api.deepl.com"
+        # DeepL uses uppercase language codes
+        self.source_lang = source_lang.upper()
+        self.target_lang = target_lang.upper()
+        self._available = bool(self.api_key)
+        
+        if self._available:
+            print(f"[DeepL] Initialized ({self.base_url.split('//')[1]})")
+        else:
+            print("[DeepL] No API key found, disabled")
+    
+    def translate(self, text: str) -> Optional[str]:
+        """Translate text using DeepL API. Returns None on failure."""
+        if not self._available or not text.strip():
+            return None
+            
+        try:
+            response = requests.post(
+                f"{self.base_url}/v2/translate",
+                headers={"Authorization": f"DeepL-Auth-Key {self.api_key}"},
+                data={
+                    "text": text,
+                    "source_lang": self.source_lang,
+                    "target_lang": self.target_lang
+                },
+                timeout=5
+            )
+            response.raise_for_status()
+            result = response.json()["translations"][0]["text"]
+            print(f"[DeepL] Translated: '{text[:30]}...' -> '{result[:30]}...'")
+            return result
+        except Exception as e:
+            print(f"[DeepL] Error: {e}")
+            return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TRANSLATION ENGINE (DeepL → Google → Argos)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TranslationEngine:
     """
-    Hybrid Translation Engine (Google Translate + Argos Offline Fallback).
-    Priority: Google Translate (Quality) -> Argos (Offline/Fallback)
+    Hybrid Translation Engine with priority:
+    1. DeepL API (Highest quality, Finnish supported)
+    2. Google Translate (Fallback, good quality)
+    3. Argos Offline (Last resort, lower quality)
     """
     
     def __init__(self, source_lang: str = "en", target_lang: str = "tr"):
         self.source_lang = source_lang
         self.target_lang = target_lang
-        self.translator = None
+        self.translator = None  # Argos translator
         self._installed = False
+        
+        # Initialize translators
+        self.deepl_translator = DeepLTranslator(source_lang=source_lang, target_lang=target_lang)
         self.google_translator = GoogleTranslator(source=source_lang, target=target_lang)
         
     def load(self):
         """Load translation models"""
-        if self._installed: # Already attempted setup
+        if self._installed:
             return
             
         print(f"[Translate] Initializing Hybrid Engine {self.source_lang} -> {self.target_lang}...")
         
-        # Google Translate is API based, no "loading" needed but let's check basic connectivity?
-        # No, better to try it on first request.
-        
-        # Load Offline Model (Argos) as Backup
+        # Load Offline Model (Argos) as Last Resort Backup
         try:
             import argostranslate.package
             import argostranslate.translate
             
-            # Update package index and install if necessary
-            # Note: In production, maybe check if installed first to be faster
             argostranslate.package.update_package_index()
             available_packages = argostranslate.package.get_available_packages()
             package_to_install = next(
@@ -394,46 +473,75 @@ class TranslationEngine:
                     print(f"[Translate] Installing offline package: {package_to_install}")
                     argostranslate.package.install_from_path(package_to_install.download())
                 
-                # Get translator object
                 installed_languages = argostranslate.translate.get_installed_languages()
                 source = next((l for l in installed_languages if l.code == self.source_lang), None)
                 target = next((l for l in installed_languages if l.code == self.target_lang), None)
                 
                 if source and target:
                     self.translator = source.get_translation(target)
-                    print(f"[Translate] Fallback Offline Model Loaded: {source.name} -> {target.name}")
+                    print(f"[Translate] Argos Offline Loaded: {source.name} -> {target.name}")
             else:
-                print("[Translate] Offline package not available.")
+                print("[Translate] Argos package not available for this language pair.")
                 
         except Exception as e:
-            print(f"[Translate] Offline model setup failed: {e}")
+            print(f"[Translate] Argos setup failed: {e}")
             
         self._installed = True
 
     def translate(self, text: str) -> str:
-        """Translate text with fallback logic"""
+        """Translate text with fallback chain: DeepL -> Google -> Argos"""
         if not text or not text.strip():
             return ""
+        
+        text_stripped = text.strip()
+        
+        # 1. Try DeepL (Highest Quality) - Skip for Finnish (User request: better quality on Google)
+        if self.source_lang.lower() != 'fi':
+            result = self.deepl_translator.translate(text)
+            if result:
+                result_stripped = result.strip()
+                # Check if DeepL actually translated (not just returned same text)
+                if result_stripped.lower() != text_stripped.lower():
+                    return result
+                else:
+                    print(f"[DeepL] Same text returned, falling back to Google...")
+        else:
+            print(f"[DeepL] Skipping for Finnish (source='fi')")
             
-        # 1. Try Google Translate (High Quality)
+        # 2. Try Google Translate (Fallback)
         try:
             result = self.google_translator.translate(text)
             if result:
+                print(f"[Google] Translated successfully")
                 return result
         except Exception as e:
-            # Silent fallback (uncomment to debug)
-            # print(f"[Translate] Google API failed: {e}")
+            print(f"[Google] Error: {e}")
             pass
             
-        # 2. Fallback to Argos (Offline)
+        # 3. Fallback to Argos (Offline)
         if self.translator:
             try:
                 return self.translator.translate(text)
             except Exception as e:
-                print(f"[Translate] Offline failed: {e}")
+                print(f"[Translate] Argos failed: {e}")
                 return text
         
         return text
+
+    def update_source_lang(self, new_source_lang: str):
+        """Update source language and reinitialize translators"""
+        if new_source_lang == self.source_lang:
+            return
+            
+        print(f"[Translate] Updating source language: {self.source_lang} -> {new_source_lang}")
+        self.source_lang = new_source_lang
+        
+        # Reinitialize translators with new source language
+        self.deepl_translator = DeepLTranslator(source_lang=new_source_lang, target_lang=self.target_lang)
+        self.google_translator = GoogleTranslator(source=new_source_lang, target=self.target_lang)
+        
+        # Note: Argos offline translator is not reinitialized here
+        # because downloading new language packs is slow and not all pairs are available
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -594,7 +702,11 @@ class SubtitleEngine:
             # Normalize RMS roughly to 0.0 - 1.0 range based on typical speech volume
             # Typical speech RMS might be 0.01 to 0.1. 
             # Let's boost it visually.
-            visual_level = min(1.0, rms * 10.0) 
+            visual_level = min(1.0, rms * 20.0) # Boosted sensitivity
+            # Debug: Print visual level to see if it's > 0
+            if visual_level > 0.05:
+                print(f"[Audio] Level: {visual_level:.4f} (RMS: {rms:.6f})")
+            
             self.publisher.publish_audio_level(visual_level)
             self._last_audio_level_time = now
 
@@ -641,6 +753,12 @@ class SubtitleEngine:
                             
                             if key == 'streaming_mode':
                                 self.config.streaming_mode = bool(value)
+                            elif key == 'source_lang':
+                                self.config.source_lang = str(value)
+                                # Also update translation engine
+                                if hasattr(self, 'translator') and self.translator:
+                                    self.translator.update_source_lang(str(value))
+                                print(f"[Command] Source language set to: {value}", flush=True)
                     except json.JSONDecodeError:
                         pass
                             
@@ -655,7 +773,8 @@ class SubtitleEngine:
         last_context = ""  # Hafıza (Önceki cümle)
         
         # Maksimum segment süresi (saniye) - Çok uzarsa kesip yeni satıra geçsin
-        MAX_SEGMENT_DURATION = 10.0 
+        # Maksimum segment süresi (saniye) - Çok uzarsa kesip yeni satıra geçsin
+        MAX_SEGMENT_DURATION = 5.0 # Reduced from 10.0s to 5.0s to fix 5-7s lag 
         
         while self._running:
             # Wait for event
@@ -671,6 +790,8 @@ class SubtitleEngine:
                 if not self._current_speech_audio:
                     continue
                 # Copy buffer for processing to avoid holding lock during heavy ops
+                # Fix: Track count to only remove processed chunks later
+                processed_count = len(self._current_speech_audio)
                 current_audio_copy = list(self._current_speech_audio)
                 
             # Determine Interval based on Streaming Mode
@@ -715,7 +836,7 @@ class SubtitleEngine:
             # Burada 'last_partial_text' streaming için kullanılıyordu, context için
             # bir üst scope'ta 'previous_sentence' tutmak daha iyi.
             
-            text, confidence = self.transcriber.transcribe(
+            text, confidence, detected_lang = self.transcriber.transcribe(
                 audio, 
                 self.config.sample_rate, 
                 prompt=last_context  # <--- Use previous sentence as context
@@ -726,8 +847,17 @@ class SubtitleEngine:
                 with self._audio_lock:
                     self._current_speech_audio.clear()
                 continue
+            
+            # 5.5. Language Match Check
+            # Only translate if detected language matches selected source language
+            if detected_lang != self.config.source_lang:
+                # Detected language doesn't match selected - skip translation
+                print(f"[Engine] Detected '{detected_lang}' but selected '{self.config.source_lang}', skipping...", flush=True)
+                with self._audio_lock:
+                    self._current_speech_audio.clear()
+                continue
 
-            # 6. Translate
+            # 6. Translate (language matched)
             translated = self.translator.translate(text)
             
             # 7. Publish
@@ -739,32 +869,45 @@ class SubtitleEngine:
                 confidence=confidence
             )
             
-            self.publisher.publish(result)
-            self._last_transcript_time = now
+            # Stable Mode Logic: Only publish if final (sentence complete)
+            # Fast Mode Logic: Publish everything immediately
+            should_publish = True
+            if not self.config.streaming_mode:
+                if not is_final:
+                    should_publish = False # Suppress partial results in Stable mode
+            
+            if should_publish:
+                self.publisher.publish(result)
+                self._last_transcript_time = now
             
             if is_final:
                 # Update context for next sentence
                 last_context = text # "Hafıza" güncelle
                 
                 with self._audio_lock:
-                    self._current_speech_audio.clear()
+                    # Fix: Only remove the chunks we actually processed
+                    # New chunks might have arrived during transcription!
+                    del self._current_speech_audio[:processed_count]
                 # Eğer timeout ise ve hala konuşuyorsa (VAD true ise), son konuşma zamanını resetleme ki hemen yeni cümle başlasın?
                 # Şimdilik direkt temizliyoruz, ses gelmeye devam ederse _on_audio_chunk yeni buffer dolduracak.
             else:
                 pass
-    
-    def start(self):
-        """Start the engine"""
+    def start(self, model_size: str = "medium"):
+        """Start the audio capture and processing loop"""
         if self._running:
             return
-        
+
         print("[Engine] Starting...")
         self._running = True
         
-        # Pre-load models
-        print("[Engine] Loading AI models (this may take a moment)...")
-        self.transcriber.load()
-        self.translator.load()
+        # Load AI Models
+        print(f"[Engine] Loading AI models (this may take a moment)...")
+        
+        # 1. Whisper (ASR)
+        # options: tiny, base, small, medium, large-v3
+        print(f"[Whisper] Loading model '{model_size}' (device={self.transcriber.device}, compute={self.transcriber.compute_type})...")
+        self.transcriber.load(model_size) # Assuming transcriber.load now takes model_size
+        self.translator.load() # Keep translator load as is
         
         # Start components
         self.publisher.start()

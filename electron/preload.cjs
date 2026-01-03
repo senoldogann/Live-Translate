@@ -1,23 +1,11 @@
 /**
- * Electron Preload Script
+ * Electron Preload Script (CommonJS)
  * 
  * Context isolation ile güvenli IPC köprüsü sağlar.
  * Renderer process'e sadece gerekli API'leri expose eder.
- * 
- * NOT: Bu dosya CommonJS formatında olmalı.
  */
 
 const { contextBridge, ipcRenderer } = require('electron');
-
-console.log('[Preload] Loading Electron API...');
-
-// Type definitions (for reference, not used in runtime)
-// interface TranscriptData {
-//     original: string;
-//     translated: string;
-//     timestamp: number;
-//     isFinal: boolean;
-// }
 
 const electronAPI = {
     // ═══════════════════════════════════════════════════════════════
@@ -25,30 +13,26 @@ const electronAPI = {
     // ═══════════════════════════════════════════════════════════════
     onTranscriptUpdate: (callback) => {
         const handler = (_event, data) => {
-            console.log('[Preload] Received transcript-update:', data);
             callback(data);
         };
-
         ipcRenderer.on('transcript-update', handler);
-
-        // Cleanup function
         return () => {
             ipcRenderer.removeListener('transcript-update', handler);
         };
     },
 
     onAudioLevel: (callback) => {
-        const handler = (_event, level) => callback(level);
+        const handler = (_event, level) => {
+            callback(level);
+        };
         ipcRenderer.on('audio-level', handler);
-        return () => ipcRenderer.removeListener('audio-level', handler);
-    },
-
-    updateInteractiveZones: (zones) => {
-        ipcRenderer.send('update-interactive-zones', zones);
+        return () => {
+            ipcRenderer.removeListener('audio-level', handler);
+        };
     },
 
     // ═══════════════════════════════════════════════════════════════
-    // Window Controls (for drag functionality)
+    // Mouse/Interaction
     // ═══════════════════════════════════════════════════════════════
     setIgnoreMouseEvents: (ignore, options) => {
         ipcRenderer.send('set-ignore-mouse-events', ignore, options);
@@ -58,25 +42,29 @@ const electronAPI = {
         ipcRenderer.send('move-window', deltaX, deltaY);
     },
 
-    setWindowHeight: (height) => {
-        ipcRenderer.send('set-window-height', height);
-    },
-
-    setStreamingMode: (enabled) => {
-        ipcRenderer.send('set-streaming-mode', enabled);
-    },
-
     setOpacity: (opacity) => {
         ipcRenderer.send('set-opacity', opacity);
+    },
+
+    updateInteractiveZones: (zones) => {
+        ipcRenderer.send('update-interactive-zones', zones);
+    },
+
+    // ═══════════════════════════════════════════════════════════════
+    // Window Control
+    // ═══════════════════════════════════════════════════════════════
+    setWindowHeight: (height) => {
+        ipcRenderer.send('set-window-height', height);
     },
 
     forceFocus: () => {
         ipcRenderer.send('force-focus');
     },
 
-    // ═══════════════════════════════════════════════════════════════
-    // Engine Controls
-    // ═══════════════════════════════════════════════════════════════
+    quitApp: () => {
+        ipcRenderer.send('app-quit');
+    },
+
     restartEngine: () => {
         ipcRenderer.send('restart-engine');
     },
@@ -85,19 +73,22 @@ const electronAPI = {
         ipcRenderer.send('toggle-stealth', enabled);
     },
 
-    quitApp: () => {
-        ipcRenderer.send('app-quit');
+    setStreamingMode: (enabled) => {
+        ipcRenderer.send('set-streaming-mode', enabled);
+    },
+
+    setLanguage: (lang) => {
+        console.log('[Preload] setLanguage called with:', lang);
+        ipcRenderer.send('set-language', lang);
     },
 
     // ═══════════════════════════════════════════════════════════════
     // App Info
     // ═══════════════════════════════════════════════════════════════
-    getAppInfo: () => {
-        return ipcRenderer.invoke('get-app-info');
-    },
+    getAppInfo: () => ipcRenderer.invoke('get-app-info'),
 };
 
-// Expose to window object
+// Expose to renderer
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);
 
-console.log('[Preload] Electron API exposed to renderer');
+console.log('[Preload] Electron API exposed to renderer (CJS version)');

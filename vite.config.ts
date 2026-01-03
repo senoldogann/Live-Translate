@@ -21,7 +21,7 @@ export default defineConfig({
                 },
             },
             {
-                // Preload script
+                // Preload script - MUST be CommonJS for Electron
                 entry: 'electron/preload.ts',
                 onstart(options) {
                     options.reload();
@@ -30,8 +30,10 @@ export default defineConfig({
                     build: {
                         outDir: 'dist-electron',
                         rollupOptions: {
+                            external: ['electron'],
                             output: {
-                                format: 'cjs', // CommonJS for preload
+                                format: 'cjs',
+                                entryFileNames: '[name].js',
                             },
                         },
                     },

@@ -20,7 +20,9 @@ describe('ControlBar Component', () => {
         onToggleVisible: vi.fn(),
         onQuit: vi.fn(),
         isStreaming: false,
-        onToggleStreaming: vi.fn()
+        onToggleStreaming: vi.fn(),
+        language: 'en' as const,
+        onLanguageChange: vi.fn()
     };
 
     it('renders correctly with default props', () => {

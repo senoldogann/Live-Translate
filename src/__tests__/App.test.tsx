@@ -43,7 +43,8 @@ describe('App Component', () => {
             setIgnoreMouseEvents: vi.fn(),
             restartEngine: vi.fn(),
             quitApp: vi.fn(),
-            forceFocus: vi.fn()
+            forceFocus: vi.fn(),
+            setLanguage: vi.fn()
         };
     });
 

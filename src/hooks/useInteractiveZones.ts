@@ -70,8 +70,8 @@ export function useInteractiveZones({
         // UI değişimlerinde hemen güncelle
         updateZones();
 
-        // Her 200ms'de bir konum güncelle (pencere taşınırsa vs)
-        const interval = setInterval(updateZones, 200);
+        // Her 500ms'de bir konum güncelle (pencere taşınırsa vs) - reduced from 200ms
+        const interval = setInterval(updateZones, 500);
 
         return () => clearInterval(interval);
     }, [showControlBar, showHistory, bottomSectionRef, restoreBtnRef, subtitleCount]);
