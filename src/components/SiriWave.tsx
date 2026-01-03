@@ -28,14 +28,16 @@ const SiriWave: React.FC<SiriWaveProps> = ({
     const phaseRef = useRef(0);
     const animationFrameRef = useRef<number>();
 
-    // Configuration
-    // Klasik Siri dalgaları: 3 ana çizgi + zayıf yan çizgiler
+    // Configuration for "Intertwined" Multi-Line Wave
+    // 6 curves with symmetrical phase offsets to create the "braided" look
     const curves = [
-        { attenuation: -2, lineWidth: 1, opacity: 0.1 },
-        { attenuation: -6, lineWidth: 1, opacity: 0.2 },
-        { attenuation: 4, lineWidth: 1, opacity: 0.4 },
-        { attenuation: 2, lineWidth: 1, opacity: 0.6 },
-        { attenuation: 1, lineWidth: 1.5, opacity: 1 },
+        { opacity: 1, phase: 0 },
+        { opacity: 0.8, phase: 0.5 },
+        { opacity: 0.8, phase: -0.5 },
+        { opacity: 0.6, phase: 1.0 },
+        { opacity: 0.6, phase: -1.0 },
+        { opacity: 0.4, phase: 1.5 },
+        { opacity: 0.4, phase: -1.5 },
     ];
 
     // Interpolated Amplitude (Smooth transitions)
@@ -46,47 +48,31 @@ const SiriWave: React.FC<SiriWaveProps> = ({
         ctx.clearRect(0, 0, width, height);
 
         // Smooth amplitude transition
-        // Hedef amplitude doğru yumuşak geçiş (Linear Interpolation)
-        // Eğer sessizse (active ama ses yok) çok hafif bir dalgalanma (0.1) olsun ki "dinliyor" hissi versin
-        const targetAmp = isActive ? Math.max(0.05, amplitude * 1.5) : 0;
-
-        // Yumuşak geçiş katsayısı (0.1 = yavaş, 0.3 = hızlı)
+        const targetAmp = isActive ? Math.max(0.1, amplitude * 1.8) : 0;
         currentAmpRef.current += (targetAmp - currentAmpRef.current) * 0.15;
 
-        // Tamamen durduysa ve target 0 ise çizme (CPU save)
         if (!isActive && currentAmpRef.current < 0.001) return;
 
         phaseRef.current += speed;
 
-        // Draw curves
-        curves.forEach((curve, index) => {
+        curves.forEach((curve) => {
             ctx.beginPath();
-
-            // Renk kullanımı (hex to rgb dönüşümü basitleştirildi, varsayılan olarak beyaz/opaklık mantığı)
-            // Daha gelişmiş renk yönetimi için hexToRgb helper gerekebilir ama şimdilik color prop'u direkt kullanalım mı?
-            // Hayır, opacity ile oynadığımız için color string'i manipüle etmek zor.
-            // Basitçe color prop'u görmezden gelip beyaz yapalım ya da color'ı rgb ise parçalayalım.
-            // En temizi: Kullanıcının verdiği rengi kullanmak ama opacity curve'den gelsin.
-            // Şimdilik 'color' prop'unu kullanmıyoruz, o yüzden unused warning'i silmek için prop'tan çıkaralım ya da _color yapalım.
-            // Ama kullanıcı "eski animasyon" dedi, eski animasyonda renk var mıydı? Evet.
-            // Basit çözüm: Rengi direkt kullanmak yerine strokeStyle'ı dinamik yapalım.
-
-            // Fix: Use generic white with opacity for classic iOS look
             ctx.strokeStyle = `rgba(255, 255, 255, ${curve.opacity})`;
-            ctx.lineWidth = curve.lineWidth;
+            ctx.lineWidth = 1.5;
 
-            for (let x = 0; x <= width; x += 5) { // Optimizasyon: x artışı 5px
+            // Draw sine wave
+            for (let x = 0; x <= width; x += 2) {
                 const xRunning = x / width; // 0 to 1
 
-                // Classic Siri Wave Formula
-                // y = A * sin(B * x + C)
-                // A key part is attenuation: wave matches 0 at ends
-                const attenuation = Math.pow(4 * xRunning * (1 - xRunning), Math.abs(curve.attenuation));
+                // Attenuation: Fade out at edges (Parabolic envelope)
+                // 4 * x * (1-x) creates a parabola peaking at 0.5
+                const attenuation = Math.pow(4 * xRunning * (1 - xRunning), 2);
 
-                // Actual wave
+                // Wave formula: 
+                // x * frequency + moving_phase + fixed_curve_phase
                 const y = height / 2 +
-                    Math.sin(xRunning * 12 + phaseRef.current - index) *
-                    (currentAmpRef.current * height * 0.45) *
+                    Math.sin(xRunning * 10 + phaseRef.current + curve.phase) *
+                    (currentAmpRef.current * height * 0.4) *
                     attenuation;
 
                 if (x === 0) ctx.moveTo(x, y);
