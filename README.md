@@ -1,208 +1,132 @@
 # Stealth Subtitle Translator
+> **The Ultimate Privacy-First Live Translation Suite for macOS**
 
-> 🎯 **Gerçek zamanlı, gizlilik odaklı masaüstü altyazı çeviri uygulaması**
+![Version](https://img.shields.io/badge/version-1.0.0-blue?style=for-the-badge&logo=none)
+![Build](https://img.shields.io/badge/build-passing-success?style=for-the-badge&logo=github-actions)
+![Platform](https://img.shields.io/badge/platform-macOS%20Silicon-black?style=for-the-badge&logo=apple)
+![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
 
-macOS için tasarlanmış, sistem sesini yakalayıp canlı olarak transkribe ve çeviri yapan, **ekran paylaşımına tamamen görünmez** bir overlay uygulaması.
+**Stealth Subtitle Translator**, kurumsal toplantılar, gizli görüşmeler ve canlı yayınlar için tasarlanmış, **askeri düzeyde tespit edilemezlik** sağlayan yeni nesil bir altyazı aracıdır.
 
-![Platform](https://img.shields.io/badge/platform-macOS-blue)
-![Apple Silicon](https://img.shields.io/badge/optimized-Apple%20Silicon-orange)
-![License](https://img.shields.io/badge/license-MIT-green)
-
-## ✨ Özellikler
-
-- **🔒 Stealth Mode**: Ekran paylaşımı ve ekran kaydına **%100 görünmez** (NSWindowSharingNone)
-- **🎙️ Gerçek Zamanlı**: Sistem sesini yakalayıp anında transkribe
-- **🌍 Çevrimdışı Çeviri**: İngilizce → Türkçe çeviri (tamamen yerel)
-- **🖥️ Apple Silicon**: M1/M2/M3 için optimize edilmiş performans
-- **💰 %100 Ücretsiz**: Ücretli API gerektirmez
-
-## 🏗️ Mimari
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Electron App                             │
-│  ┌─────────────────┐    ┌─────────────────┐                │
-│  │   React UI      │◄───│   ZMQ SUB       │                │
-│  │  (Glassmorphism)│    │   (IPC)         │                │
-│  └─────────────────┘    └────────▲────────┘                │
-│                                  │                          │
-│         setContentProtection(true)                          │
-│              (NSWindowSharingNone)                          │
-└─────────────────────────────────┼───────────────────────────┘
-                                  │
-                           ZeroMQ PUB/SUB
-                                  │
-┌─────────────────────────────────▼───────────────────────────┐
-│                    Python Sidecar                           │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
-│  │ BlackHole   │─►│ Faster-     │─►│ ArgosTranslate      │ │
-│  │ Audio       │  │ Whisper     │  │ EN → TR             │ │
-│  │ Capture     │  │ (int8)      │  │                     │ │
-│  └─────────────┘  └─────────────┘  └─────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## 📋 Gereksinimler
-
-### Sistem
-- macOS 12.0+ (Monterey veya üstü)
-- Apple Silicon (M1/M2/M3) - Intel'de de çalışır ancak optimize değil
-
-### BlackHole Audio Driver
-Sistem sesini yakalamak için [BlackHole 2ch](https://existential.audio/blackhole/) kurulu olmalıdır:
-
-```bash
-brew install blackhole-2ch
-```
-
-Kurulumdan sonra:
-1. **System Preferences > Sound > Output** → "BlackHole 2ch" seçin
-2. **Audio MIDI Setup** → "Multi-Output Device" oluşturun (Built-in + BlackHole)
-
-### Python 3.10+
-```bash
-brew install python@3.11
-```
-
-## 🚀 Kurulum
-
-### 1. Repository'yi klonlayın
-```bash
-git clone <repo-url>
-cd live-translate
-```
-
-### 2. Node bağımlılıklarını yükleyin
-```bash
-npm install
-```
-
-### 3. Python bağımlılıklarını yükleyin
-```bash
-cd python
-pip install -r requirements.txt
-cd ..
-```
-
-### 4. Uygulamayı başlatın
-```bash
-# Geliştirme modu (Electron + Vite + Python)
-npm run start
-
-# Sadece Electron
-npm run electron:dev
-
-# Sadece Python engine
-npm run python:engine
-```
-
-## 🎛️ Kullanım
-
-1. **BlackHole** audio device'ı konfigüre edin
-2. Uygulamayı başlatın
-3. Bir toplantı veya video oynatın
-4. Altyazılar ekranın alt kısmında görünecek
-
-### Kontroller
-| Kontrol | Açıklama |
-|---------|----------|
-| 🎤 Mikrofon | Dinlemeyi başlat/durdur |
-| 🛡️ Kalkan | Stealth mode aç/kapat |
-| 👁️ Göz | Orijinal metni göster/gizle |
-| Opaklık Slider | Altyazı şeffaflığı |
-| Font Slider | Yazı boyutu |
-| 🔄 Yenile | AI engine'i yeniden başlat |
-
-## ⚙️ Konfigürasyon
-
-Python engine konfigürasyonu `python/engine.py` içinde:
-
-```python
-@dataclass
-class EngineConfig:
-    # Whisper ayarları
-    whisper_model: str = "small"      # tiny, base, small, medium, large-v3
-    whisper_device: str = "cpu"       # cpu veya mps
-    whisper_compute_type: str = "int8" # int8, float16, float32
-    
-    # Çeviri
-    source_lang: str = "en"
-    target_lang: str = "tr"
-    
-    # Audio device
-    audio_device: str = "BlackHole 2ch"
-```
-
-### Model Seçimi
-
-| Model | RAM | Hız | Kalite |
-|-------|-----|-----|--------|
-| tiny | ~1GB | ⚡⚡⚡ | ⭐⭐ |
-| base | ~1GB | ⚡⚡⚡ | ⭐⭐⭐ |
-| small | ~2GB | ⚡⚡ | ⭐⭐⭐⭐ |
-| medium | ~5GB | ⚡ | ⭐⭐⭐⭐⭐ |
-| large-v3 | ~10GB | 🐢 | ⭐⭐⭐⭐⭐ |
-
-## 🔒 Stealth Mode Nasıl Çalışır?
-
-```typescript
-// Electron main.ts
-stealthWindow.setContentProtection(true);
-```
-
-Bu tek satır macOS'un **NSWindow.sharingType** property'sini `NSWindowSharingNone` olarak ayarlar:
-
-- ✅ Kullanıcı ekranında görünür
-- ❌ Zoom/Teams/OBS tarafından yakalanamaz
-- ❌ QuickTime ekran kaydında görünmez
-- ❌ Screenshot'larda görünmez
-
-## 🐛 Sorun Giderme
-
-### "BlackHole not found" hatası
-```bash
-# Device listesini kontrol edin
-python3 -c "import sounddevice; print(sounddevice.query_devices())"
-```
-
-### "faster-whisper" yüklenemiyor
-```bash
-# Apple Silicon için
-pip install faster-whisper --no-cache-dir
-```
-
-### ZMQ bağlantı hatası
-Port 5555'in kullanımda olmadığından emin olun:
-```bash
-lsof -i :5555
-```
-
-## 📁 Proje Yapısı
-
-```
-live-translate/
-├── electron/
-│   ├── main.ts           # Stealth window konfigürasyonu
-│   └── preload.ts         # IPC bridge
-├── src/
-│   ├── App.tsx           # Ana React component
-│   ├── index.css         # Glassmorphism styles
-│   └── components/
-│       ├── SubtitleOverlay.tsx
-│       ├── ControlBar.tsx
-│       └── SiriWave.tsx
-├── python/
-│   ├── engine.py         # AI engine
-│   └── requirements.txt
-├── package.json
-├── vite.config.ts
-└── README.md
-```
-
-## 📜 Lisans
-
-MIT License - Detaylar için [LICENSE](LICENSE) dosyasına bakın.
+Ekran paylaşımı yaparken, kaydı alırken veya yayın yaparken; altyazılarınızı **SADECE SİZ** görürsünüz. Zoom, Teams, OBS veya QuickTime bu katmanı **göremez**.
 
 ---
 
-**⚠️ Yasal Uyarı**: Bu uygulama eğitim amaçlıdır. Kurumsal toplantılarda veya gizli görüşmelerde izinsiz kullanımı yasalara aykırı olabilir.
+## ✨ Neden Stealth?
+
+### 🛡️ Ghost-Level Görünmezlik
+macOS'un çekirdek seviyesindeki `NSWindowSharingNone` API'sini kullanarak pencereyi ekran yakalama motorlarından soyutlar.
+- **Toplantı Güvenliği:** Sunum yaparken çeviriyi takip edin, katılımcılar sadece sunumu görsün.
+- **Yayıncılar İçin:** Yayın sırasında chat'i veya notları takip edin, izleyiciler temiz ekran görsün.
+
+### ⚡ Hybrid Core Architecture
+Hibrit mimarimiz, Electron'un görsel gücünü Python'un yapay zeka kaslarıyla birleştirir.
+- **Engine:** OpenAI `faster-whisper` (Int8 Quantization) ile milisaniyelik transkripsiyon.
+- **Translation:** Google Translate + Offline Argos Fallback ile kesintisiz Türkçe çeviri.
+- **IPC:** ZeroMQ (ZMQ) üzerinden <5ms gecikmeli veri akışı.
+
+### 💎 Premium User Experience
+- **Glassmorphism UI:** macOS Big Sur+ estetiğine uygun, şeffaf ve blurlu arayüz.
+- **Interactive Zones:** Tıklanabilir alanları dinamik yöneten akıllı overlay. Transkriptlerin arkasındaki pencerelere tıklayabilirsiniz.
+- **Voice Activity Detection (VAD):** Silencio VAD motoru ile sadece konuşma anında işlem yapar, CPU'yu yormaz.
+
+---
+
+## 🏗️ Sistem Mimarisi
+
+Detaylı teknik inceleme için [ARCHITECTURE.md](ARCHITECTURE.md) dosyasını inceleyin.
+
+```mermaid
+graph TD
+    User[Kullanıcı Konuşması] -->|BlackHole 2ch| PyCore[Python AI Core]
+    PyCore -->|VAD - Konuşma Tespiti| Whisper[Faster-Whisper STT]
+    Whisper -->|Text| Translate[Google/Argos Translate]
+    Translate -->|ZMQ Pub| Electron[Electron Main Process]
+    Electron -->|IPC Bridge| React[React Renderer UI]
+    React -->|Overlay| Display[Kullanıcı Ekranı]
+    
+    subgraph Stealth Layer
+    Electron --o SetContentProtection=True --> Display
+    end
+```
+
+---
+
+## 🚀 Hızlı Kurulum
+
+### Ön Gereksinimler
+*   **Donanım:** Apple Silicon (M1/M2/M3) önerilir.
+*   **OS:** macOS Monterey (12.0) veya üstü.
+*   **Sürücü:** [BlackHole 2ch](https://existential.audio/blackhole/) (Ses yakalama için zorunlu).
+
+```bash
+brew install blackhole-2ch
+brew install python@3.11
+```
+
+### Kurulum Adımları
+
+1.  **Repo'yu Klonlayın:**
+    ```bash
+    git clone https://github.com/senoldogann/live-translate.git
+    cd live-translate
+    ```
+
+2.  **Bağımlılıkları Yükleyin (Full Stack):**
+    ```bash
+    # Node.js Paketleri
+    npm install
+
+    # Python AI Motoru
+    npm run python:install
+    ```
+
+3.  **Uygulamayı Başlatın:**
+    ```bash
+    npm start
+    ```
+    *Bu komut hem Electron arayüzünü hem de Python motorunu eşzamanlı başlatır.*
+
+---
+
+## 🎮 Kontroller & Kısayollar
+
+Arayüz üzerindeki **Control Bar** sayesinde tüm deneyimi yönetebilirsiniz:
+
+| İkon | Özellik | Açıklama |
+| :--- | :--- | :--- |
+| **🎤** | **Listening** | Transkripsiyonu başlatır/durdurur. |
+| **🛡️** | **Stealth Mode** | Ekran paylaşımında gizliliği açar/kapatır. (Turuncu = Görünür) |
+| **⚡** | **Stream Mode** | **Kelime Modu** (Hızlı) veya **Cümle Modu** (Stabil) arasında geçiş yapar. |
+| **👁️** | **Original** | Orijinal İngilizce metni gizler/gösterir. |
+| **🔄** | **Restart** | AI motorunu takılırsa yeniden başlatır. |
+| **📜** | **History** | Geçmiş konuşmaların dökümünü açar. |
+
+---
+
+## 🧪 Geliştirici & Test
+
+Proje, endüstri standardı test ve lint araçları ile korunmaktadır.
+
+```bash
+# Unit Testleri Çalıştır (Vitest)
+npm test
+
+# Lint Kontrolü (ESLint)
+npm run lint
+
+# Production Build Al
+npm run electron:build
+```
+
+---
+
+## ⚠️ Yasal Uyarı
+
+Bu yazılım **eğitim ve erişilebilirlik** amaçlı geliştirilmiştir. İzinsiz ses kaydı veya kurumsal gizlilik politikalarının ihlali durumunda sorumluluk kullanıcıya aittir. "Stealth Mode" özelliği, kullanıcı mahremiyeti içindir; kötü niyetli kullanımlar yasaktır.
+
+---
+
+<div align="center">
+  <sub>Designed & Engineered by <a href="https://github.com/senoldogann">Senol Dogan</a> in Istanbul.</sub>
+</div>

@@ -5,8 +5,17 @@
  * Stealth mode, listening toggle, opacity ve font size kontrolleri.
  */
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
+
+// Constants
+const OPACITY_MIN = 0.3;
+const OPACITY_MAX = 1.0;
+const OPACITY_STEP = 0.1;
+
+const FONT_SIZE_MIN = 14;
+const FONT_SIZE_MAX = 28;
+const FONT_SIZE_STEP = 2;
 
 interface ControlBarProps {
     isListening: boolean;
@@ -179,6 +188,8 @@ function ControlBar({
                 <div
                     className={`status-dot tooltip ${isListening ? 'listening' : 'paused'}`}
                     data-tooltip={isListening ? 'Dinleniyor' : 'Duraklatıldı'}
+                    aria-label={isListening ? 'Dinleniyor' : 'Duraklatıldı'}
+                    role="status"
                 />
 
                 {/* Divider */}
@@ -189,6 +200,7 @@ function ControlBar({
                     className={`btn btn-icon tooltip ${isListening ? 'btn-success' : 'btn-danger'}`}
                     onClick={onToggleListening}
                     data-tooltip={isListening ? 'Durakla' : 'Dinle'}
+                    aria-label={isListening ? 'Durakla' : 'Dinle'}
                 >
                     {isListening ? Icons.mic : Icons.micOff}
                 </button>
@@ -198,6 +210,7 @@ function ControlBar({
                     className={`btn btn-icon tooltip ${isStreaming ? 'btn-success' : ''}`}
                     onClick={onToggleStreaming}
                     data-tooltip={isStreaming ? 'Kelime Kelime Modu (Hızlı)' : 'Cümle Modu (Stabil)'}
+                    aria-label={isStreaming ? 'Kelime Kelime Modu (Hızlı)' : 'Cümle Modu (Stabil)'}
                 >
                     {Icons.stream}
                 </button>
@@ -207,6 +220,7 @@ function ControlBar({
                     className={`btn btn-icon tooltip ${isStealthMode ? '' : 'btn-warning'}`}
                     onClick={onToggleStealth}
                     data-tooltip={isStealthMode ? '📷 Screenshot Al (Görünür Yap)' : '🔒 Gizli Moda Dön'}
+                    aria-label={isStealthMode ? 'Screenshot Al (Görünür Yap)' : 'Gizli Moda Dön'}
                 >
                     {isStealthMode ? Icons.camera : Icons.shield}
                 </button>
@@ -216,6 +230,7 @@ function ControlBar({
                     className={`btn btn-icon tooltip ${showOriginal ? '' : ''}`}
                     onClick={onToggleOriginal}
                     data-tooltip={showOriginal ? 'İngilizceyi Gizle' : 'İngilizceyi Göster'}
+                    aria-label={showOriginal ? 'İngilizceyi Gizle' : 'İngilizceyi Göster'}
                 >
                     {showOriginal ? Icons.eye : Icons.eyeOff}
                 </button>
@@ -229,11 +244,12 @@ function ControlBar({
                     <input
                         type="range"
                         className="slider"
-                        min="0.3"
-                        max="1"
-                        step="0.1"
+                        min={OPACITY_MIN}
+                        max={OPACITY_MAX}
+                        step={OPACITY_STEP}
                         value={opacity}
                         onChange={(e) => onOpacityChange(parseFloat(e.target.value))}
+                        aria-label="Opaklık"
                     />
                 </div>
 
@@ -243,11 +259,12 @@ function ControlBar({
                     <input
                         type="range"
                         className="slider"
-                        min="14"
-                        max="28"
-                        step="2"
+                        min={FONT_SIZE_MIN}
+                        max={FONT_SIZE_MAX}
+                        step={FONT_SIZE_STEP}
                         value={fontSize}
                         onChange={(e) => onFontSizeChange(parseInt(e.target.value))}
+                        aria-label="Yazı Boyutu"
                     />
                 </div>
 
@@ -259,6 +276,7 @@ function ControlBar({
                     className="btn btn-icon tooltip"
                     onClick={onRestartEngine}
                     data-tooltip="Motoru Yeniden Başlat"
+                    aria-label="Motoru Yeniden Başlat"
                 >
                     {Icons.refresh}
                 </button>
@@ -271,6 +289,7 @@ function ControlBar({
                     className="btn btn-icon tooltip"
                     onClick={onShowHistory}
                     data-tooltip="Tüm Transcript"
+                    aria-label="Tüm Transcript"
                 >
                     {Icons.list}
                 </button>
@@ -283,6 +302,7 @@ function ControlBar({
                     className="btn btn-icon tooltip"
                     onClick={() => onToggleVisible()}
                     data-tooltip="Gizle"
+                    aria-label="Gizle"
                 >
                     ▼
                 </button>
@@ -295,6 +315,7 @@ function ControlBar({
                     className="btn btn-icon tooltip btn-danger"
                     onClick={onQuit}
                     data-tooltip="Kapat"
+                    aria-label="Kapat"
                 >
                     {Icons.x}
                 </button>

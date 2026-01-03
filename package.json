@@ -15,25 +15,30 @@
         "python:engine": "source python/.venv/bin/activate && python python/engine.py",
         "start": "concurrently -k \"npm run electron:dev\" \"sleep 5 && npm run python:engine\"",
         "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+        "test": "vitest",
         "preview": "vite preview"
     },
     "dependencies": {
+        "framer-motion": "^11.15.0",
         "react": "^18.3.1",
         "react-dom": "^18.3.1",
-        "framer-motion": "^11.15.0",
         "zeromq": "^6.0.0-beta.20"
     },
     "devDependencies": {
+        "@testing-library/jest-dom": "^6.9.1",
+        "@testing-library/react": "^16.3.1",
         "@types/react": "^18.3.18",
         "@types/react-dom": "^18.3.5",
         "@vitejs/plugin-react": "^4.3.4",
         "concurrently": "^9.1.2",
         "electron": "^33.3.0",
         "electron-builder": "^25.1.8",
+        "jsdom": "^27.4.0",
         "typescript": "^5.7.2",
         "vite": "^6.0.6",
         "vite-plugin-electron": "^0.28.8",
         "vite-plugin-electron-renderer": "^0.14.6",
+        "vitest": "^4.0.16",
         "wait-on": "^8.0.2"
     },
     "build": {

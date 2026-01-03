@@ -77,7 +77,7 @@ function createStealthWindow(): BrowserWindow {
             contextIsolation: true,
             nodeIntegration: false,
             sandbox: false, // Preload için gerekli
-            webSecurity: false, // Dev mode için
+            webSecurity: !isDev, // Production'da güvenliği aç (Dev: false, Prod: true)
         },
 
         // macOS spesifik
@@ -87,11 +87,6 @@ function createStealthWindow(): BrowserWindow {
         visualEffectState: 'inactive',
     });
 
-    // ═══════════════════════════════════════════════════════════════════
-    // ⚠️ KRİTİK: EKRAN PAYLAŞIMINA GÖRÜNMEZLIK
-    // Bu satır macOS'ta NSWindow.sharingType = NSWindowSharingNone yapar.
-    // Zoom, Teams, OBS, QuickTime bu pencereyi GÖREMEZ.
-    // ═══════════════════════════════════════════════════════════════════
     // ═══════════════════════════════════════════════════════════════════
     // ⚠️ KRİTİK: EKRAN PAYLAŞIMINA GÖRÜNMEZLIK
     // Bu satır macOS'ta NSWindow.sharingType = NSWindowSharingNone yapar.
@@ -320,14 +315,9 @@ function setupIpcHandlers(): void {
         interactiveZones = zones;
     });
 
-    // Mouse olaylarını yönet (drag için) - ARTIK POLLING YÖNETİYOR AMA DRAG İÇİN ZORLA AÇMAK GEREKEBİLİR
-    // Drag başladığında polling'i pause edebiliriz veya override edebiliriz.
-    // Şimdilik çakışmayı önlemek için bu eski handler'ı basitleştirelim veya kaldıralım.
-    // Ancak App.tsx hala bunu çağırıyorsa sorun olabilir.
-    // Legacy support için bırakalım ama polling daha baskın olacak.
+    // Mouse olaylarını yönet (drag için)
     ipcMain.on('set-ignore-mouse-events', (_event, ignore: boolean, options?: { forward: boolean }) => {
         // Polling aktifse bu çağrıyı yoksay veya sadece belirli durumlarda kullan
-        // Şimdilik polling sistemi her 50ms'de override edeceği için bu anlamsız.
     });
 
     // Pencere pozisyonunu ayarla
@@ -371,16 +361,16 @@ function setupIpcHandlers(): void {
         }
     });
 
-
-
     // Streaming Modu Ayarla
     ipcMain.on('set-streaming-mode', (_event, enabled: boolean) => {
         console.log(`[Main] Set streaming mode: ${enabled}`);
-        commandSock.send(JSON.stringify({
-            type: 'config',
-            key: 'streaming_mode',
-            value: enabled
-        })).catch((err: any) => console.error('Failed to send config:', err));
+        if (commandSock) {
+            commandSock.send(JSON.stringify({
+                type: 'config',
+                key: 'streaming_mode',
+                value: enabled
+            })).catch((err: any) => console.error('Failed to send config:', err));
+        }
     });
 
     // Python engine'i yeniden başlat
@@ -491,14 +481,39 @@ app.on('activate', () => {
 app.on('before-quit', () => {
     console.log('[Main] Cleaning up...');
 
+    if (interactionPollingInterval) {
+        clearInterval(interactionPollingInterval);
+        interactionPollingInterval = null;
+    }
+
     if (pythonProcess) {
-        pythonProcess.kill('SIGTERM');
+        console.log('[Main] Killing Python process...');
+        pythonProcess.kill('SIGTERM'); // Try graceful kill first
+
+        // Force kill fallback if it doesn't exit in 1000ms
+        const pid = pythonProcess.pid;
+        if (pid) {
+            setTimeout(() => {
+                try {
+                    process.kill(pid, 'SIGKILL');
+                    console.log('[Main] Force killed Python process');
+                } catch (e) {
+                    // Ignore if already dead
+                }
+            }, 1000);
+        }
+
         pythonProcess = null;
     }
 
     if (zmqSubscriber) {
         zmqSubscriber.close();
         zmqSubscriber = null;
+    }
+
+    if (commandSock) {
+        commandSock.close();
+        commandSock = null;
     }
 });
 

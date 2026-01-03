@@ -36,9 +36,6 @@ import webrtcvad
 from faster_whisper import WhisperModel
 import argostranslate.package
 import argostranslate.translate
-from dataclasses import dataclass, asdict
-from collections import deque
-from pathlib import Path
 from deep_translator import GoogleTranslator
 
 # Lazy imports for faster startup
@@ -526,7 +523,7 @@ class SubtitleEngine:
     def __init__(self, config: EngineConfig):
         self.config = config
         self._running = False
-        self._audio_buffer: deque = deque(maxlen=int(config.buffer_duration / config.chunk_duration))
+        # self._audio_buffer Removed unused deque
         self._last_speech_time = 0.0  # Son ses algılama zamanı
         self._last_transcript_time = 0.0
         self._min_transcript_interval = 0.5  # Minimum seconds between transcriptions (SPEEDUP)
@@ -535,6 +532,7 @@ class SubtitleEngine:
         self._sentence_buffer: list = []  # Biriken cümleler
         self._silence_threshold = 0.5  # 0.5 saniye sessizlik = yeni satır (SPEEDUP)
         self._current_speech_audio: list = []  # Şu anki konuşma sesi
+        self._audio_lock = threading.Lock() # Thread safety lock
         
         # Components
         self.vad = VoiceActivityDetector(
@@ -573,8 +571,8 @@ class SubtitleEngine:
         self._command_thread: Optional[threading.Thread] = None
         self._command_context = zmq.Context()
         self._command_socket = self._command_context.socket(zmq.SUB)
-        self._command_socket.connect("tcp://127.0.0.1:5556") # Node.js (PUB) listens here? No, Node binds, Python connects.
-        # Let's say Node Binds to 5556 (PUB), Python Connects (SUB).
+        # Note: Electron Binds to 5556, we Connect to it.
+        self._command_socket.connect("tcp://127.0.0.1:5556")
         self._command_socket.setsockopt_string(zmq.SUBSCRIBE, "")
         
         # Audio Level Broadcasting State
@@ -608,19 +606,47 @@ class SubtitleEngine:
         
         if is_speech:
             # Ses var - mevcut konuşma bufferına ekle
-            self._current_speech_audio.append(audio)
+            with self._audio_lock:
+                self._current_speech_audio.append(audio)
+            
             self._last_speech_time = now
             # Hemen işlemesi için event set et (Streaming)
             self._process_event.set()
         else:
             # Sessizlik
-            if self._current_speech_audio:
+            has_audio = False
+            with self._audio_lock:
+                has_audio = len(self._current_speech_audio) > 0
+
+            if has_audio:
                 # Hala bufferda ses var
-                pass
-                
                 # Eğer sessizlik süresi dolduysa Finalize et
                 if now - self._last_speech_time >= self._silence_threshold:
                     self._process_event.set()
+
+    def _command_loop(self):
+        """Listen for commands/config updates from Electron"""
+        print("[Command] Listener started")
+        while self._running:
+            try:
+                # Non-blocking check or poller could be better, but blocking with timeout is fine
+                if self._command_socket.poll(timeout=500):
+                    msg = self._command_socket.recv_string()
+                    try:
+                        data = json.loads(msg)
+                        if data.get('type') == 'config':
+                            key = data.get('key')
+                            value = data.get('value')
+                            print(f"[Command] Config update: {key} = {value}")
+                            
+                            if key == 'streaming_mode':
+                                self.config.streaming_mode = bool(value)
+                    except json.JSONDecodeError:
+                        pass
+                            
+            except Exception as e:
+                print(f"[Command] Error: {e}")
+                time.sleep(1)
 
     def _process_loop(self):
         """Background processing loop - Real-time Streaming"""
@@ -641,8 +667,11 @@ class SubtitleEngine:
             
             now = time.time()
             
-            if not self._current_speech_audio:
-                continue
+            with self._audio_lock:
+                if not self._current_speech_audio:
+                    continue
+                # Copy buffer for processing to avoid holding lock during heavy ops
+                current_audio_copy = list(self._current_speech_audio)
                 
             # Determine Interval based on Streaming Mode
             # Streaming = Aggressive (50ms). Sentence = Config Default (0.5s or dynamic).
@@ -656,9 +685,7 @@ class SubtitleEngine:
             is_silence_final = (now - self._last_speech_time >= self._silence_threshold)
             
             # Ses buffer süresini hesapla
-            current_buffer_duration = (len(self._current_speech_audio) * 480) / self.config.sample_rate # Yaklasik chunk size 480 olmayabilir ama estimate.
-            # Daha dogrusu:
-            total_samples = sum(len(c) for c in self._current_speech_audio)
+            total_samples = sum(len(c) for c in current_audio_copy)
             duration_sec = total_samples / self.config.sample_rate
             
             is_timeout_final = (duration_sec > MAX_SEGMENT_DURATION)
@@ -667,13 +694,14 @@ class SubtitleEngine:
             
             # 4. Prepare Audio
             try:
-                audio = np.concatenate(list(self._current_speech_audio))
+                audio = np.concatenate(current_audio_copy)
             except ValueError:
                 continue
                 
             if len(audio) < self.config.sample_rate * 0.3: 
                 if is_final:
-                    self._current_speech_audio.clear()
+                    with self._audio_lock:
+                        self._current_speech_audio.clear()
                 continue
             
 
@@ -695,7 +723,8 @@ class SubtitleEngine:
             text = text.strip()
             
             if not text:
-                self._current_speech_audio.clear()
+                with self._audio_lock:
+                    self._current_speech_audio.clear()
                 continue
 
             # 6. Translate
@@ -717,7 +746,8 @@ class SubtitleEngine:
                 # Update context for next sentence
                 last_context = text # "Hafıza" güncelle
                 
-                self._current_speech_audio.clear()
+                with self._audio_lock:
+                    self._current_speech_audio.clear()
                 # Eğer timeout ise ve hala konuşuyorsa (VAD true ise), son konuşma zamanını resetleme ki hemen yeni cümle başlasın?
                 # Şimdilik direkt temizliyoruz, ses gelmeye devam ederse _on_audio_chunk yeni buffer dolduracak.
             else:
@@ -742,6 +772,10 @@ class SubtitleEngine:
         # Start processing thread
         self._process_thread = threading.Thread(target=self._process_loop, daemon=True)
         self._process_thread.start()
+
+        # Start command thread
+        self._command_thread = threading.Thread(target=self._command_loop, daemon=True)
+        self._command_thread.start()
         
         # Start audio capture (this blocks in callback mode)
         self.audio_capture.start()
@@ -764,6 +798,11 @@ class SubtitleEngine:
         # Wait for processing thread
         if self._process_thread:
             self._process_thread.join(timeout=2.0)
+        
+        if self._command_thread:
+            # Often ZMQ receive is blocking, so maybe it won't join easily without a message
+            # But we used poll(timeout=500), so it should exit within 0.5s
+            self._command_thread.join(timeout=2.0)
         
         print("[Engine] Stopped")
     

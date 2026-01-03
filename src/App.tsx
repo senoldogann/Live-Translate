@@ -9,8 +9,9 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import SubtitleOverlay from './components/SubtitleOverlay';
 import ControlBar from './components/ControlBar';
-import SiriWave from './components/SiriWave'; // Switched back to SiriWave
+import SiriWave from './components/SiriWave';
 import TranscriptHistory from './components/TranscriptHistory';
+import { useInteractiveZones } from './hooks/useInteractiveZones';
 import './index.css';
 
 // Types
@@ -27,13 +28,11 @@ interface SubtitleEntry {
     original: string;
     translated: string;
     timestamp: number;
-    isFinal: boolean; // Added for streaming
+    isFinal: boolean;
 }
 
 // Maksimum görüntülenecek altyazı sayısı
 const MAX_SUBTITLES = 1;
-
-
 
 function App() {
     // State
@@ -54,8 +53,6 @@ function App() {
     useEffect(() => {
         // Handle incoming transcripts
         const handleTranscriptUpdate = (data: TranscriptData) => {
-            // console.log('[App] Received transcript:', data);
-
             if (!data.original && !data.translated) return;
 
             setSubtitles((prev) => {
@@ -77,7 +74,7 @@ function App() {
 
                     // Eğer son kart Final ise veya hiç kart yoksa -> Yeni Partial Kart
                     const newEntry: SubtitleEntry = {
-                        id: `partial-${now}`,
+                        id: `sentence-${now}`, // Stable ID prefix
                         original: data.original,
                         translated: data.translated,
                         timestamp: now,
@@ -90,14 +87,11 @@ function App() {
                 // Son kart partial ise, onu Finalize et
                 if (latest && !latest.isFinal) {
                     const finalizedLatest = {
-                        ...latest,
+                        ...latest, // Keep ID same! (Prevents Flicker)
                         original: data.original,
                         translated: data.translated,
                         timestamp: now,
                         isFinal: true,
-                        id: `final-${now}` // ID'yi final yap ki animasyon resetlensin mi? Hayır, key değişirse titrer. ID'yi korumak daha iyi olabilir ama 'final-' prefixi yeni bir kart hissi verir. Streaming'de ID sabit kalmalı.
-                        // Partial ID 'partial-...' idi. Final ID de aynı kalsa?
-                        // React key değiştiğinde unmount/remount yapar. Yumuşak geçiş için key aynı kalmalı.
                     };
                     // Update main list
                     const updatedList = [finalizedLatest, ...prev.slice(1)];
@@ -110,7 +104,7 @@ function App() {
 
                 // Eğer son kart zaten Final ise ve yeni bir Final geldiyse (Nadir durum, belki Partial atlandı)
                 const newFinalEntry: SubtitleEntry = {
-                    id: `final-${now}`,
+                    id: `sentence-${now}`,
                     original: data.original,
                     translated: data.translated,
                     timestamp: now,
@@ -122,15 +116,12 @@ function App() {
         };
 
         if (typeof window.electronAPI === 'undefined') {
-            // ... mock data logic update needed if used ...
             return;
         }
 
         const unsubscribe = window.electronAPI.onTranscriptUpdate(handleTranscriptUpdate);
         // Audio Level Listener
         const unsubscribeAudio = window.electronAPI.onAudioLevel((level) => {
-            // Level is roughly 0 to 0.5 (RMS). Scale it for visualization (0 to 1)
-            // Apply some gain
             const scaledLevel = Math.min(1, level * 5);
             setAudioLevel(scaledLevel);
         });
@@ -153,7 +144,6 @@ function App() {
     // Toggle listening
     const handleToggleListening = useCallback(() => {
         setIsListening((prev) => !prev);
-        // TODO: Send to Python engine
     }, []);
 
     // Toggle original text display
@@ -189,76 +179,22 @@ function App() {
     // Refs for interaction detection
     const bottomSectionRef = useRef<HTMLDivElement>(null); // ControlBar wrapper
     const restoreBtnRef = useRef<HTMLButtonElement>(null);
-    // TranscriptHistory already manages its own events mostly, but checking bound helps
 
-    // Central interaction handler
-    // Interaction Polling (Replaces handleMouseMove)
-    useEffect(() => {
-        if (!window.electronAPI) return;
-
-        const updateZones = () => {
-            const zones = [];
-
-            // 1. Bottom Section (Control Bar)
-            if (showControlBar && bottomSectionRef.current) {
-                const rect = bottomSectionRef.current.getBoundingClientRect();
-                zones.push({
-                    x: Math.round(rect.left),
-                    y: Math.round(rect.top),
-                    width: Math.round(rect.width),
-                    height: Math.round(rect.height)
-                });
-            }
-
-            // 2. Restore Button
-            if (!showControlBar && restoreBtnRef.current) {
-                const rect = restoreBtnRef.current.getBoundingClientRect();
-                zones.push({
-                    x: Math.round(rect.left),
-                    y: Math.round(rect.top),
-                    width: Math.round(rect.width),
-                    height: Math.round(rect.height)
-                });
-            }
-
-            // 3. Subtitles (Draggable)
-            const subtitles = document.querySelectorAll('.interactive-subtitle');
-            subtitles.forEach(el => {
-                const rect = el.getBoundingClientRect();
-                zones.push({
-                    x: Math.round(rect.left),
-                    y: Math.round(rect.top),
-                    width: Math.round(rect.width),
-                    height: Math.round(rect.height)
-                });
-            });
-
-            // 4. History Panel
-            if (showHistory) {
-                // History açıkken tüm ekran etkileşimli olsun (basit çözüm)
-                zones.push({ x: 0, y: 0, width: 9999, height: 9999 });
-            }
-
-            window.electronAPI.updateInteractiveZones(zones);
-        };
-
-        // UI değişimlerinde hemen güncelle
-        updateZones();
-
-        // Her 200ms'de bir konum güncelle (pencere taşınırsa vs)
-        const interval = setInterval(updateZones, 200);
-
-        return () => clearInterval(interval);
-    }, [showControlBar, showHistory, subtitles.length]); // subtitles değişince boyut değişebilir
+    // Central interaction handler (Custom Hook)
+    useInteractiveZones({
+        showControlBar,
+        showHistory,
+        bottomSectionRef,
+        restoreBtnRef,
+        subtitleCount: subtitles.length
+    });
 
     // Toggle history panel
     const handleToggleHistory = useCallback(() => {
         setShowHistory((prev) => !prev);
     }, []);
 
-    // ═══════════════════════════════════════════════════════════════════
     // Dynamic Window Resizing Logic
-    // ═══════════════════════════════════════════════════════════════════
     const containerRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -268,8 +204,6 @@ function App() {
             for (const entry of entries) {
                 // İçerik yüksekliğini al (padding dahil)
                 const contentHeight = entry.contentRect.height + 40; // +40px extra padding/safe area
-
-                // Çok küçük değişimleri veya gereksiz güncellemeleri filtrele
                 // Min yükseklik 180px
                 const targetHeight = Math.max(180, Math.ceil(contentHeight));
 
@@ -281,7 +215,7 @@ function App() {
         resizeObserver.observe(containerRef.current);
 
         return () => resizeObserver.disconnect();
-    }, [subtitles, showControlBar, fontSize]); // Dependencies crucial for trigger
+    }, [subtitles, showControlBar, fontSize]);
 
     return (
         <div ref={containerRef} className="app-container" style={{ height: 'fit-content', minHeight: '100vh' }}>
