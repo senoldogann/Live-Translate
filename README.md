@@ -39,15 +39,15 @@ Detaylı teknik inceleme için [ARCHITECTURE.md](ARCHITECTURE.md) dosyasını in
 
 ```mermaid
 graph TD
-    User[Kullanıcı Konuşması] -->|BlackHole 2ch| PyCore[Python AI Core]
-    PyCore -->|VAD| Whisper[Faster-Whisper (Medium)]
-    Whisper -->|Loop Filter| PostProcess[Metin Temizleme]
-    PostProcess -->|Text| Router{Dil Kontrolü}
-    Router -->|Fince| Google[Google Translate]
-    Router -->|Diğer| DeepL[DeepL API]
+    User["Kullanıcı Konuşması"] -->|BlackHole 2ch| PyCore["Python AI Core"]
+    PyCore -->|VAD| Whisper["Faster-Whisper (Medium)"]
+    Whisper -->|Loop Filter| PostProcess["Metin Temizleme"]
+    PostProcess -->|Text| Router{"Dil Kontrolü"}
+    Router -->|Fince| Google["Google Translate"]
+    Router -->|Diğer| DeepL["DeepL API"]
     DeepL -->|Hata/Limit| Google
-    Google -->|Sonuç| Electron[Electron Main Process]
-    Electron -->|IPC| React[React Renderer UI]
+    Google -->|Sonuç| Electron["Electron Main Process"]
+    Electron -->|IPC| React["React Renderer UI"]
 ```
 
 ---
