@@ -133,6 +133,8 @@ body {
 
 /* Children pointer-events regain */
 .bottom-section,
+.content-zone,
+.subtitle-area,
 .subtitle-overlay,
 .transcript-history-panel,
 .toggle-restore-btn {
@@ -185,6 +187,27 @@ body {
     gap: var(--spacing-sm);
     padding-bottom: var(--spacing-sm);
     overflow: hidden;
+}
+
+/* ── Content Zone (wraps SiriWave ↔ Subtitles toggle) ─────────────────────── */
+.content-zone {
+    width: 100%;
+    min-height: 80px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: center;
+    position: relative;
+}
+
+/* ── Wave Zone (idle state, shown when no speech) ──────────────────────────── */
+.wave-zone {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 6px 0;
+    pointer-events: none;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════

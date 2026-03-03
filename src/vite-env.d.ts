@@ -16,6 +16,13 @@ interface AppInfo {
     isDev: boolean;
 }
 
+interface SetupConfig {
+    isSetupComplete: boolean;
+    deepgramKey?: string;
+    deeplKey?: string;
+    language?: 'en' | 'tr';
+}
+
 interface ElectronAPI {
     onTranscriptUpdate: (callback: (data: TranscriptData) => void) => () => void;
     onAudioLevel: (callback: (level: number) => void) => () => void;
@@ -25,6 +32,7 @@ interface ElectronAPI {
     moveWindow: (deltaX: number, deltaY: number) => void;
     setWindowHeight: (height: number) => void;
     setStreamingMode: (enabled: boolean) => void;
+    setEngineType: (type: string) => void;
     setOpacity: (opacity: number) => void;
     forceFocus: () => void;
     restartEngine: () => void;
@@ -32,6 +40,14 @@ interface ElectronAPI {
     setLanguage: (lang: string) => void;
     quitApp: () => void;
     getAppInfo: () => Promise<AppInfo>;
+    openHistoryWindow: (transcripts: unknown[]) => void;
+    onShowControlBar?: (callback: () => void) => () => void;
+
+    // Kurulum Sihirbazı IPC'leri
+    getConfig: () => Promise<SetupConfig>;
+    saveConfig: (config: Partial<SetupConfig>) => Promise<boolean>;
+    checkBlackhole: () => Promise<boolean>;
+    openUrl: (url: string) => void;
 }
 
 declare global {

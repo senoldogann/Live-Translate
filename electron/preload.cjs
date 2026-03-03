@@ -88,8 +88,17 @@ const electronAPI = {
     },
 
     setLanguage: (lang) => {
-        console.log('[Preload] setLanguage called with:', lang);
         ipcRenderer.send('set-language', lang);
+    },
+
+    openHistoryWindow: (transcripts) => {
+        ipcRenderer.send('open-history-window', transcripts);
+    },
+
+    onShowControlBar: (callback) => {
+        const handler = () => callback();
+        ipcRenderer.on('show-control-bar', handler);
+        return () => ipcRenderer.removeListener('show-control-bar', handler);
     },
 
     // ═══════════════════════════════════════════════════════════════

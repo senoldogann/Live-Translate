@@ -58,11 +58,22 @@ interface ElectronAPI {
     toggleStealth: (enabled: boolean) => void;
     // NEW: Streaming Mode
     setStreamingMode: (enabled: boolean) => void;
+    // NEW: Engine Type
+    setEngineType: (type: string) => void;
     // NEW: Language Selection
     setLanguage: (lang: string) => void;
 
+    // Kurulum Sihirbazı
+    getConfig: () => Promise<any>;
+    saveConfig: (config: any) => Promise<boolean>;
+    checkBlackhole: () => Promise<boolean>;
+    openUrl: (url: string) => void;
+
     // App info
     getAppInfo: () => Promise<AppInfo>;
+
+    openHistoryWindow: (transcripts: unknown[]) => void;
+    onShowControlBar?: (callback: () => void) => () => void;
 }
 
 // Expose protected methods to renderer
@@ -139,9 +150,22 @@ const electronAPI: ElectronAPI = {
         ipcRenderer.send('set-streaming-mode', enabled);
     },
 
+    setEngineType: (engineType: string) => {
+        ipcRenderer.send('set-engine-type', engineType);
+    },
+
     setLanguage: (lang: string) => {
-        console.log('[Preload] setLanguage called with:', lang);
         ipcRenderer.send('set-language', lang);
+    },
+
+    openHistoryWindow: (transcripts: unknown[]) => {
+        ipcRenderer.send('open-history-window', transcripts);
+    },
+
+    onShowControlBar: (callback: () => void) => {
+        const handler = () => callback();
+        ipcRenderer.on('show-control-bar', handler);
+        return () => ipcRenderer.removeListener('show-control-bar', handler);
     },
 
     // ═══════════════════════════════════════════════════════════════
@@ -150,6 +174,14 @@ const electronAPI: ElectronAPI = {
     getAppInfo: () => {
         return ipcRenderer.invoke('get-app-info');
     },
+
+    // ═══════════════════════════════════════════════════════════════
+    // Setup Wizard
+    // ═══════════════════════════════════════════════════════════════
+    getConfig: () => ipcRenderer.invoke('get-config'),
+    saveConfig: (config: any) => ipcRenderer.invoke('save-config', config),
+    checkBlackhole: () => ipcRenderer.invoke('check-blackhole'),
+    openUrl: (url: string) => ipcRenderer.send('open-url', url)
 };
 
 // Expose to window object

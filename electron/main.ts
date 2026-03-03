@@ -6,10 +6,19 @@
  * Bu sayede pencere ekran paylaşımı ve ekran kaydında GÖRÜNMEZ olur.
  */
 
-import { app, BrowserWindow, ipcMain, screen } from 'electron';
-import { spawn, ChildProcess } from 'child_process';
+import { app, BrowserWindow, ipcMain, screen, globalShortcut, shell } from 'electron';
+import { spawn, ChildProcess, exec } from 'child_process';
 import path from 'path';
+import fs from 'fs';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 import { fileURLToPath } from 'url';
+
+// Setup Config helper
+function getSetupConfigPath() {
+    return path.join(app.getPath('userData'), 'live-translate-setup.json');
+}
 
 // ESM __dirname equivalent
 const __filename = fileURLToPath(import.meta.url);
@@ -25,11 +34,12 @@ let zmqSubscriber: any = null;
 let commandSock: any = null; // ZMQ Publisher (Streaming komutları için)
 let interactiveZones: { x: number, y: number, width: number, height: number }[] = [];
 let interactionPollingInterval: NodeJS.Timeout | null = null;
-let isInteractionEnabled = true; // Start with interaction ENABLED (clickable)
-let hasReceivedZones = false; // Track if zones have been received at least once
+let isInteractionEnabled = true;
+let hasReceivedZones = false;
+let historyWindow: BrowserWindow | null = null; // Transcript history window
 
 // Environment
-const isDev = process.env.NODE_ENV !== 'production';
+const isDev = !app.isPackaged;
 const VITE_DEV_SERVER_URL = 'http://localhost:5173';
 const ZMQ_ADDRESS = 'tcp://127.0.0.1:5555';
 
@@ -43,80 +53,53 @@ function createStealthWindow(): BrowserWindow {
     const primaryDisplay = screen.getPrimaryDisplay();
     const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
 
-    // Window boyutları (ekranın alt kısmında, ortalanmış)
-    const windowWidth = Math.min(1000, screenWidth * 0.8);
-    const windowHeight = 280; // Daha yüksek - İngilizce metin görünsün
-    const xPosition = Math.floor((screenWidth - windowWidth) / 2);
-    // const yPosition = screenHeight - windowHeight - 30; // ESKİ: Alt kısım
-    const yPosition = Math.floor((screenHeight - windowHeight) / 2); // YENİ: Tam orta
+    // If setup is not complete, show a larger window for the wizard
+    let windowHeight = 280;
+    try {
+        const configRaw = fs.readFileSync(getSetupConfigPath(), 'utf-8');
+        const setupConfig = JSON.parse(configRaw);
+        if (!setupConfig.setupComplete) {
+            windowHeight = 600; // Wizard height
+        }
+    } catch {
+        windowHeight = 600; // Default to wizard height if config missing
+    }
 
-    // Debug: preload path - Use manual CJS file to bypass Vite's ESM conversion
+    const windowWidth = Math.min(1000, Math.floor(screenWidth * 0.75));
+    const xPosition = Math.floor((screenWidth - windowWidth) / 2);
+    const yPosition = screenHeight - windowHeight - 30;
+
     const preloadPath = isDev
         ? path.join(process.cwd(), 'electron', 'preload.cjs')
-        : path.join(__dirname, '..', 'electron', 'preload.cjs');
-    console.log('[Main] Preload path:', preloadPath);
+        : path.join(__dirname, 'preload.js');
 
     const win = new BrowserWindow({
         width: windowWidth,
         height: windowHeight,
         x: xPosition,
         y: yPosition,
-        center: true, // Garanti olsun
-        type: 'panel',
-        fullscreenable: false,
-        transparent: true,           // Şeffaf arka plan (CSS ile kontrol)
-        frame: false,                // Sistem çerçevesi yok
-        alwaysOnTop: true,           // Her zaman üstte
-        hasShadow: false,            // Gölge yok (tespit edilebilir)
-        skipTaskbar: true,           // Taskbar'da görünme
-        focusable: true,             // Focus alabilir (kontroller için gerekli)
-
-        // ═══════════════════════════════════════════════════════════════
-
+        transparent: true,
+        frame: false,
+        alwaysOnTop: true,
+        hasShadow: false,
+        focusable: true,
+        skipTaskbar: true,
         webPreferences: {
             preload: preloadPath,
             contextIsolation: true,
             nodeIntegration: false,
-            sandbox: false, // Preload için gerekli
-            webSecurity: !isDev, // Production'da güvenliği aç (Dev: false, Prod: true)
+            sandbox: false,
+            webSecurity: !isDev,
         },
-
-        // macOS spesifik
-        titleBarStyle: 'hidden',
-        trafficLightPosition: { x: -100, y: -100 }, // Trafik ışıklarını gizle
-        vibrancy: undefined, // Vibrancy'yi kapatıyoruz (stealth için)
-        visualEffectState: 'inactive',
     });
 
-    // ═══════════════════════════════════════════════════════════════════
-    // ⚠️ KRİTİK: EKRAN PAYLAŞIMINA GÖRÜNMEZLIK
-    // Bu satır macOS'ta NSWindow.sharingType = NSWindowSharingNone yapar.
-    // Zoom, Teams, OBS, QuickTime bu pencereyi GÖREMEZ.
-    // ═══════════════════════════════════════════════════════════════════
+    // Screen-share invisibility: NSWindowSharingNone (macOS)
     win.setContentProtection(true);
 
-    // ═══════════════════════════════════════════════════════════════════
-    // Click-through: BAŞLANGIÇTA KAPALI - kontroller için gerekli
-    // Renderer'dan dinamik olarak açılıp kapanacak
-    // ═══════════════════════════════════════════════════════════════════
-    // win.setIgnoreMouseEvents(true, { forward: true }); // DEVRE DIŞI
-
-    // Dock'ta gizle (macOS) - Ve Space davranışlarını ayarla
+    // Visible on all Spaces and full-screen apps
     if (process.platform === 'darwin') {
-        app.dock?.hide();
-        // Space değiştirmeyi engelle, her yerde görün
         win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     }
-
-    // Window level ayarı (screen-saver en üst seviyedir)
-    win.setAlwaysOnTop(true, 'screen-saver', 1);
-    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-
-    // DevTools - development modunda otomatik aç
-    if (isDev) {
-        win.webContents.openDevTools({ mode: 'detach' });
-    }
-
 
     return win;
 }
@@ -132,18 +115,27 @@ function startPythonEngine(): ChildProcess | null {
     // Virtual environment Python path
     const venvPython = isDev
         ? path.join(process.cwd(), 'python', '.venv', 'bin', 'python')
-        : 'python3';
+        : path.join(process.resourcesPath, 'python', '.venv', 'bin', 'python');
 
     console.log('[Main] Starting Python engine:', pythonPath);
     console.log('[Main] Using Python:', venvPython);
 
+    // Setup Config üzerinden API Key okuma
+    let env = { ...process.env };
+    try {
+        const configRaw = fs.readFileSync(getSetupConfigPath(), 'utf-8');
+        const setupConfig = JSON.parse(configRaw);
+        if (setupConfig.deepgramKey) env.DEEPGRAM_API_KEY = setupConfig.deepgramKey;
+        if (setupConfig.deeplKey) env.DEEPL_API_KEY = setupConfig.deeplKey;
+    } catch {
+        // İlk çalışmada veya hata durumunda boş kalır
+    }
+
     try {
         const proc = spawn(venvPython, [pythonPath], {
-            stdio: ['pipe', 'pipe', 'pipe'],
-            env: {
-                ...process.env,
-                PYTHONUNBUFFERED: '1', // Real-time output
-            },
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: env,
+            detached: false,
         });
 
         proc.stdout?.on('data', (data: Buffer) => {
@@ -179,7 +171,12 @@ function startPythonEngine(): ChildProcess | null {
         });
 
         proc.stderr?.on('data', (data: Buffer) => {
-            console.error('[Python Error]', data.toString().trim());
+            const errorMsg = data.toString().trim();
+            console.error('[Python Error]', errorMsg);
+            // Log to renderer for debugging in production if needed
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.executeJavaScript(`console.error("Python Stderr: ${errorMsg.replace(/"/g, '\\"')}")`);
+            }
         });
 
         proc.on('close', (code: number | null) => {
@@ -335,7 +332,13 @@ function setupIpcHandlers(): void {
 
     // Mouse olaylarını yönet (drag için)
     ipcMain.on('set-ignore-mouse-events', (_event, ignore: boolean, options?: { forward: boolean }) => {
-        // Polling aktifse bu çağrıyı yoksay veya sadece belirli durumlarda kullan
+        if (mainWindow) {
+            try {
+                mainWindow.setIgnoreMouseEvents(ignore, options);
+            } catch (e) {
+                console.error('[Main] Failed to set ignore mouse events:', e);
+            }
+        }
     });
 
     // Pencere pozisyonunu ayarla
@@ -379,6 +382,51 @@ function setupIpcHandlers(): void {
         }
     });
 
+    // ═══════════════════════════════════════════════════════════════
+    // Setup Wizard IPC Handlers
+    // ═══════════════════════════════════════════════════════════════
+    ipcMain.handle('get-config', () => {
+        try {
+            const data = fs.readFileSync(getSetupConfigPath(), 'utf8');
+            return JSON.parse(data);
+        } catch {
+            return { isSetupComplete: false };
+        }
+    });
+
+    ipcMain.handle('save-config', (_event, config) => {
+        try {
+            fs.writeFileSync(getSetupConfigPath(), JSON.stringify(config));
+            return true;
+        } catch (e) {
+            console.error('[Main] Failed to save config:', e);
+            return false;
+        }
+    });
+
+    ipcMain.handle('check-blackhole', async () => {
+        try {
+            console.log('[Main] Checking for BlackHole audio driver...');
+            // Broad search for any variation of BlackHole
+            const { stdout } = await execAsync('/usr/sbin/system_profiler SPAudioDataType');
+            const found = stdout.toLowerCase().includes('blackhole');
+            console.log(`[Main] BlackHole detection result: ${found}`);
+            return found;
+        } catch (e) {
+            console.error('[Main] BlackHole check failed:', e);
+            return false;
+        }
+    });
+
+    ipcMain.on('open-url', (_event, url) => {
+        console.log('[Main] Opening URL:', url);
+        shell.openExternal(url).catch(err => {
+            console.error('[Main] Failed to open URL:', err);
+        });
+    });
+
+    // ═══════════════════════════════════════════════════════════════
+
     // Streaming Modu Ayarla
     ipcMain.on('set-streaming-mode', (_event, enabled: boolean) => {
         console.log(`[Main] Set streaming mode: ${enabled}`);
@@ -412,6 +460,22 @@ function setupIpcHandlers(): void {
         }
     });
 
+    // Engine Type Change (local / cloud)
+    ipcMain.on('set-engine-type', async (_event, engineType: string) => {
+        console.log(`[Main] Set engine type: ${engineType}`);
+        if (commandSock) {
+            try {
+                await commandSock.send(JSON.stringify({
+                    type: 'config',
+                    key: 'engine_type',
+                    value: engineType
+                }));
+            } catch (err) {
+                console.error('[Main] engine-type send error:', err);
+            }
+        }
+    });
+
     // Python engine'i yeniden başlat
     ipcMain.on('restart-engine', () => {
         if (pythonProcess) {
@@ -424,35 +488,115 @@ function setupIpcHandlers(): void {
     ipcMain.on('toggle-stealth', (_event, enabled: boolean) => {
         if (mainWindow) {
             mainWindow.setContentProtection(enabled);
-            console.log(`[Main] Stealth mode: ${enabled ? 'ON' : 'OFF'}`);
         }
     });
 
-    // Opacity ayarla
+    // Opacity
     ipcMain.on('set-opacity', (_event, opacity: number) => {
         if (mainWindow) {
             mainWindow.setOpacity(Math.max(0.1, Math.min(1, opacity)));
         }
     });
 
-    // Pencereyi zorla öne getir (Restore butonu için)
+    // Restore focus (used by the show-control-bar button)
     ipcMain.on('force-focus', () => {
         if (mainWindow) {
             mainWindow.setAlwaysOnTop(true, 'screen-saver');
             mainWindow.show();
             mainWindow.moveTop();
             mainWindow.focus();
-            console.log('[Main] Forced focus requested');
         }
     });
 
-    // Uygulamayı kapat
+    // Show control bar (sent by global shortcut or tray click)
+    ipcMain.on('show-control-bar', () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('show-control-bar');
+            mainWindow.show();
+            mainWindow.focus();
+        }
+    });
+
+    // Open history in a separate native window
+    ipcMain.on('open-history-window', (_event, transcripts) => {
+        // Close existing window if already open
+        // Toggle: Close existing window if already open
+        if (historyWindow && !historyWindow.isDestroyed()) {
+            historyWindow.close();
+            return;
+        }
+
+        const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+
+        historyWindow = new BrowserWindow({
+            width: Math.min(900, Math.floor(width * 0.7)),
+            height: Math.min(700, Math.floor(height * 0.8)),
+            center: true,
+            title: 'Transcript History',
+            backgroundColor: '#0f0f0f',
+            webPreferences: {
+                contextIsolation: true,
+                nodeIntegration: false,
+                sandbox: false,
+            },
+        });
+
+        // Toggle: Close existing window if already open
+        historyWindow.webContents.on('did-finish-load', () => {
+            // Safe HTML has been loaded now
+        });
+
+        // Build history HTML content (newest first = reversed array)
+        const entries = [...transcripts as any[]].reverse().map((t: any) => {
+            const d = new Date(t.timestamp);
+            const timeStr = `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
+            return `
+                <div class="entry">
+                    <span class="time">${timeStr}</span>
+                    <div class="texts">
+                        <div class="original">${escapeHtml(t.original)}</div>
+                        <div class="translated">${escapeHtml(t.translated)}</div>
+                    </div>
+                </div>`;
+        }).join('');
+
+        const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
+  <title>Transcript History</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0f0f0f; color: #eee; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 24px; }
+    h1 { font-size: 20px; font-weight: 600; margin-bottom: 20px; color: #fff; border-bottom: 1px solid #333; padding-bottom: 12px; }
+    .entry { display: flex; gap: 16px; padding: 12px 0; border-bottom: 1px solid #1e1e1e; align-items: flex-start; }
+    .time { color: #888; font-size: 12px; min-width: 64px; padding-top: 3px; font-variant-numeric: tabular-nums; }
+    .texts { flex: 1; }
+    .original { font-size: 13px; color: rgba(255,255,255,0.55); font-style: italic; margin-bottom: 4px; }
+    .translated { font-size: 15px; color: #fff; font-weight: 500; }
+    .empty { color: #666; text-align: center; margin-top: 40px; }
+  </style>
+</head>
+<body>
+  <h1>📝 Transcript History (${(transcripts as any[]).length} entries)</h1>
+  ${entries || '<p class="empty">No transcripts yet.</p>'}
+</body>
+</html>`;
+
+        historyWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+
+        historyWindow.on('closed', () => {
+            historyWindow = null;
+        });
+    });
+
+    // Quit
     ipcMain.on('app-quit', () => {
-        console.log('[Main] Quit requested by user');
         app.quit();
     });
 
-    // Uygulama bilgisi
+    // App info
     ipcMain.handle('get-app-info', () => ({
         version: app.getVersion(),
         platform: process.platform,
@@ -461,46 +605,96 @@ function setupIpcHandlers(): void {
     }));
 }
 
+/** Escape HTML special characters for safe injection into data: URLs */
+function escapeHtml(str: string): string {
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
 /**
  * App Lifecycle
  */
-app.whenReady().then(async () => {
-    console.log('[Main] App ready, creating stealth window...');
+// Single Instance Lock
+const gotTheLock = app.requestSingleInstanceLock();
 
-    // IPC handlers
-    setupIpcHandlers();
+if (!gotTheLock) {
+    app.quit();
+} else {
+    app.on('second-instance', () => {
+        // Someone tried to run a second instance, we should focus our window.
+        if (mainWindow) {
+            if (mainWindow.isMinimized()) mainWindow.restore();
+            mainWindow.focus();
+            mainWindow.show();
+        }
+    });
 
-    // Stealth window oluştur
-    mainWindow = createStealthWindow();
+    app.whenReady().then(async () => {
+        setupIpcHandlers();
 
-    // Content yükle
-    if (isDev) {
-        await mainWindow.loadURL(VITE_DEV_SERVER_URL);
-        // DevTools aç - debug için
-        mainWindow.webContents.openDevTools({ mode: 'detach' });
-    } else {
-        await mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
-    }
+        mainWindow = createStealthWindow();
 
-    // Python engine başlat (küçük gecikme ile)
-    setTimeout(() => {
-        pythonProcess = startPythonEngine();
-    }, 1000);
+        // ─── Production Debugging: Error Listeners ───────────────────────────
+        mainWindow.webContents.on('did-fail-load', (_event: any, errorCode: number, errorDescription: string, validatedURL: string) => {
+            console.error(`[Main] Failed to load URL: ${validatedURL}`);
+            console.error(`       Error: ${errorDescription} (${errorCode})`);
+        });
 
-    // ZMQ subscriber başlat
-    // ZMQ subscriber başlat
-    setTimeout(() => {
-        startZmqSubscriber();
-    }, 2000);
+        mainWindow.webContents.on('render-process-gone', (_event: any, details: any) => {
+            console.error(`[Main] Renderer process gone. Reason: ${details.reason}, Exit Code: ${details.exitCode}`);
+        });
 
-    // ZMQ Publisher başlat
-    startZmqPublisher();
+        mainWindow.webContents.on('unresponsive', () => {
+            console.warn('[Main] Window became unresponsive');
+        });
 
-    // Interaction Polling başlat
-    startInteractionPolling();
+        try {
+            if (isDev) {
+                await mainWindow.loadURL(VITE_DEV_SERVER_URL);
+            } else {
+                // Production Path Resolution
+                const indexHtml = path.resolve(__dirname, '..', 'dist', 'index.html');
+                console.log('[Main] Loading production HTML:', indexHtml);
 
-    console.log('[Main] Stealth Subtitle Translator started successfully');
-});
+                if (!fs.existsSync(indexHtml)) {
+                    console.error('[Main] CRITICAL: index.html not found at:', indexHtml);
+                }
+
+                await mainWindow.loadFile(indexHtml);
+            }
+        } catch (err) {
+            console.error('[Main] Failed to load URL/File:', err);
+        }
+
+        // Delay Python engine startup to let Vite dev server stabilize
+        setTimeout(() => {
+            pythonProcess = startPythonEngine();
+        }, 1000);
+
+        // Start ZMQ subscriber after Python has had time to bind its port
+        setTimeout(() => {
+            startZmqSubscriber();
+        }, 2000);
+
+        startZmqPublisher();
+        startInteractionPolling();
+
+        // Global shortcut: ⌘+Shift+S (macOS) / Ctrl+Shift+S (Win/Linux) to show control bar
+        const shortcut = process.platform === 'darwin' ? 'Command+Shift+S' : 'Ctrl+Shift+S';
+        globalShortcut.register(shortcut, () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('show-control-bar');
+                mainWindow.show();
+                mainWindow.moveTop();
+                mainWindow.focus();
+            }
+        });
+    });
+}
 
 // macOS: Tüm pencereler kapandığında çık
 app.on('window-all-closed', () => {

@@ -1,8 +1,8 @@
 # Contributing to Stealth Subtitle Translator
 
-İlk olarak, bu projeye katkıda bulunmak istediğiniz için teşekkürler! 🎉
+Thanks for taking the time to contribute! 🎉
 
-Bu rehber, katkı sürecini olabildiğince net ve kolay hale getirmek için hazırlanmıştır. Projemiz "Antigravity V3.0" standartlarına göre yönetilmektedir.
+This guide explains how to get involved and what we expect from contributors.
 
 ## 🤝 Code of Conduct
 

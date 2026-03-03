@@ -83,6 +83,9 @@ class EngineConfig:
 
     # Streaming setting
     streaming_mode: bool = False
+    
+    # Engine Settings
+    engine_type: str = "local" # "local" or "cloud"
 
 CONFIG = EngineConfig()
 
@@ -625,6 +628,8 @@ class ZmqPublisher:
 # MAIN ENGINE
 # ═══════════════════════════════════════════════════════════════════════════════
 
+from deepgram_engine import DeepgramWSClient
+
 class SubtitleEngine:
     """
     Main engine orchestrating audio capture, transcription, translation, and publishing.
@@ -633,10 +638,10 @@ class SubtitleEngine:
     def __init__(self, config: EngineConfig):
         self.config = config
         self._running = False
-        # self._audio_buffer Removed unused deque
-        self._last_speech_time = 0.0  # Son ses algılama zamanı
+        self._last_speech_time = 0.0  
         self._last_transcript_time = 0.0
-        self._min_transcript_interval = 0.5  # Minimum seconds between transcriptions (SPEEDUP)
+        self._min_transcript_interval = 0.5  
+        self._deepgram = DeepgramWSClient(None) # we set publisher below
         
         # Cümle biriktirme sistemi
         self._sentence_buffer: list = []  # Biriken cümleler
@@ -672,6 +677,8 @@ class SubtitleEngine:
         )
         
         self.publisher = ZmqPublisher(address=config.zmq_address)
+        self._deepgram.publisher = self.publisher
+        self._deepgram.translator = self.translator
         
         # Processing thread
         self._process_thread: Optional[threading.Thread] = None
@@ -695,6 +702,22 @@ class SubtitleEngine:
             return
         
         now = time.time()
+        
+        if self.config.engine_type == "cloud":
+            # Send directly to Deepgram WebSocket Engine (bypassing local VAD & Whisper)
+            # Audio is float32 normalized, Deepgram expects linear16 PCM
+            audio_int16 = (audio * 32768.0).astype(np.int16).tobytes()
+            self._deepgram.send_audio(audio_int16)
+            
+            # Still broadcast volume for UI
+            rms = np.sqrt(np.mean(audio**2))
+            if now - self._last_audio_level_time >= self._audio_level_interval:
+                visual_level = min(1.0, rms * 20.0)
+                self.publisher.publish_audio_level(visual_level)
+                self._last_audio_level_time = now
+            return
+
+        # ----- LOCAL MODE (Faster Whisper) -----
         
         # 0. RMS (Enerji) Kontrolü - Dip gürültüyü filtrele ve Visualizer'a gönder
         rms = np.sqrt(np.mean(audio**2))
@@ -760,7 +783,13 @@ class SubtitleEngine:
                                 # Also update translation engine
                                 if hasattr(self, 'translator') and self.translator:
                                     self.translator.update_source_lang(str(value))
-                                print(f"[Command] Source language set to: {value}", flush=True)
+                            elif key == 'engine_type':
+                                self.config.engine_type = str(value)
+                                print(f"[Command] Engine Type set to: {value}")
+                                if value == "cloud":
+                                    self._deepgram.start()
+                                else:
+                                    self._deepgram.stop()
                     except json.JSONDecodeError:
                         pass
                             
@@ -914,6 +943,10 @@ class SubtitleEngine:
         # Start components
         self.publisher.start()
         
+        # Start deepgram initially if configured
+        if self.config.engine_type == "cloud":
+            self._deepgram.start()
+
         # Start processing thread
         self._process_thread = threading.Thread(target=self._process_loop, daemon=True)
         self._process_thread.start()
@@ -939,6 +972,7 @@ class SubtitleEngine:
         # Stop components
         self.audio_capture.stop()
         self.publisher.stop()
+        self._deepgram.stop()
         
         # Wait for processing thread
         if self._process_thread:

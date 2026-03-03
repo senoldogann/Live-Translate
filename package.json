@@ -13,7 +13,7 @@
         "electron:build": "npm run build && electron-builder",
         "python:install": "cd python && /opt/homebrew/opt/python@3.11/bin/python3.11 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt",
         "python:engine": "source python/.venv/bin/activate && python python/engine.py",
-        "start": "concurrently -k \"npm run electron:dev\" \"sleep 5 && npm run python:engine\"",
+        "start": "npm run electron:dev",
         "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
         "test": "vitest",
         "preview": "vite preview"
@@ -59,15 +59,20 @@
         },
         "files": [
             "dist/**/*",
-            "dist-electron/**/*",
-            "python/**/*"
+            "dist-electron/**/*"
         ],
         "extraResources": [
             {
                 "from": "python",
                 "to": "python",
                 "filter": [
-                    "**/*"
+                    "**/*",
+                    "!**/__pycache__",
+                    "!**/*.pyc",
+                    "!**/*.pyo",
+                    "!**/*.pyd",
+                    "!.venv/bin/pip*",
+                    "!.venv/bin/activate*"
                 ]
             }
         ]

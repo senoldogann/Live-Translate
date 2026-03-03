@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "workflow": null,
+  "current_step": null,
+  "started_at": null,
+  "last_updated": null,
+  "completed_steps": [],
+  "decisions": {},
+  "tech_stack": {},
+  "rollback_points": [],
+  "metadata": {
+    "ai_model": "Claude 4.5 Sonnet (Thinking)",
+    "user": "Default"
+  }
+}

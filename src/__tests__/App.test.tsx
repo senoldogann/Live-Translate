@@ -18,6 +18,21 @@ vi.mock('../components/SiriWave', () => ({
     default: () => <div data-testid="siri-wave" />
 }));
 
+// Mock ControlBar to simplify testing
+vi.mock('../components/ControlBar', () => ({
+    default: () => <div data-testid="control-bar" />
+}));
+
+// Mock SetupWizard to avoid setup flow in tests
+vi.mock('../components/SetupWizard', () => ({
+    default: () => <div data-testid="setup-wizard" />
+}));
+
+// Mock useInteractiveZones hook
+vi.mock('../hooks/useInteractiveZones', () => ({
+    useInteractiveZones: () => {}
+}));
+
 describe('App Component', () => {
     let mockOnTranscriptUpdate: any;
 
@@ -44,7 +59,13 @@ describe('App Component', () => {
             restartEngine: vi.fn(),
             quitApp: vi.fn(),
             forceFocus: vi.fn(),
-            setLanguage: vi.fn()
+            setLanguage: vi.fn(),
+            setEngineType: vi.fn(),
+            openHistoryWindow: vi.fn(),
+            getConfig: vi.fn().mockResolvedValue({ isSetupComplete: true }),
+            saveConfig: vi.fn().mockResolvedValue(true),
+            checkBlackhole: vi.fn().mockResolvedValue(true),
+            openUrl: vi.fn()
         };
     });
 
@@ -52,10 +73,13 @@ describe('App Component', () => {
         vi.clearAllMocks();
     });
 
-    it('renders and handles partial -> final transcript flow without flickering', () => {
+    it('renders and handles partial -> final transcript flow without flickering', async () => {
         render(<App />);
 
-        // 1. Receive Partial
+        // Wait for app to load (should show SiriWave initially)
+        await screen.findByTestId('siri-wave', {}, { timeout: 1000 });
+
+        // 1. Receive Partial - this should trigger speech active state
         act(() => {
             mockOnTranscriptUpdate({
                 original: 'Hello',
@@ -65,6 +89,8 @@ describe('App Component', () => {
             });
         });
 
+        // Now subtitle overlay should be visible (wait for state update)
+        await screen.findByTestId('subtitle-overlay', {}, { timeout: 1000 });
         expect(screen.getByText('Merhaba')).toBeInTheDocument();
         expect(screen.getByTestId('final-status')).toHaveTextContent('PARTIAL');
 

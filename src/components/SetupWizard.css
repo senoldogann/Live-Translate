@@ -1,0 +1,243 @@
+.wizard-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(10, 10, 10, 0.95);
+    backdrop-filter: blur(10px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #fff;
+    -webkit-app-region: drag;
+}
+
+.wizard-container {
+    background: #1a1a1a;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    width: 480px;
+    max-width: 90vw;
+    min-height: 400px;
+    padding: 32px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+    -webkit-app-region: no-drag;
+}
+
+.wizard-header {
+    text-align: center;
+    margin-bottom: 24px;
+}
+
+.wizard-header h2 {
+    margin: 0 0 8px 0;
+    font-size: 24px;
+    font-weight: 600;
+}
+
+.wizard-header p {
+    margin: 0;
+    color: #aaa;
+    font-size: 14px;
+}
+
+.wizard-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.wizard-actions {
+    margin-top: 32px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+}
+
+.wizard-btn {
+    padding: 10px 20px;
+    border-radius: 6px;
+    border: none;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.wizard-btn.primary {
+    background: #4a90e2;
+    color: white;
+}
+
+.wizard-btn.primary:hover {
+    background: #357abd;
+}
+
+.wizard-btn.secondary {
+    background: #333;
+    color: white;
+}
+
+.wizard-btn.secondary:hover {
+    background: #444;
+}
+
+.wizard-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Specific Step Styles */
+.lang-selector {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+}
+
+.lang-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    background: #2a2a2a;
+    border: 2px solid transparent;
+    border-radius: 8px;
+    padding: 20px 40px;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: white;
+}
+
+.lang-btn:hover {
+    background: #333;
+}
+
+.lang-btn.active {
+    border-color: #4a90e2;
+    background: rgba(74, 144, 226, 0.1);
+}
+
+.lang-btn span.emoji {
+    font-size: 32px;
+}
+
+.lang-btn span.text {
+    font-size: 16px;
+    font-weight: 500;
+}
+
+.step-info {
+    font-size: 15px;
+    line-height: 1.5;
+    color: #ddd;
+    margin-bottom: 24px;
+}
+
+.step-info strong {
+    color: #fff;
+}
+
+.feature-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.feature-list li {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: #222;
+    padding: 12px 16px;
+    border-radius: 6px;
+}
+
+.feature-icon {
+    font-size: 20px;
+}
+
+.check-result {
+    margin-top: 20px;
+    padding: 16px;
+    border-radius: 6px;
+    background: #2a2a2a;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.check-result.success {
+    background: rgba(46, 204, 113, 0.1);
+    border: 1px solid rgba(46, 204, 113, 0.3);
+}
+
+.check-result.error {
+    background: rgba(231, 76, 60, 0.1);
+    border: 1px solid rgba(231, 76, 60, 0.3);
+}
+
+.check-result .icon {
+    font-size: 24px;
+}
+
+.check-result .text h4 {
+    margin: 0 0 4px 0;
+    color: white;
+}
+
+.check-result .text p {
+    margin: 0;
+    color: #aaa;
+    font-size: 13px;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.form-group input {
+    width: 100%;
+    padding: 12px;
+    background: #222;
+    border: 1px solid #444;
+    border-radius: 6px;
+    color: white;
+    font-size: 14px;
+    box-sizing: border-box;
+}
+
+.form-group input:focus {
+    outline: none;
+    border-color: #4a90e2;
+}
+
+.form-hint {
+    font-size: 12px;
+    color: #888;
+    margin-top: 6px;
+}
+
+.form-hint a {
+    color: #4a90e2;
+    text-decoration: none;
+}
+
+.form-hint a:hover {
+    text-decoration: underline;
+}

@@ -22,7 +22,9 @@ describe('ControlBar Component', () => {
         isStreaming: false,
         onToggleStreaming: vi.fn(),
         language: 'en' as const,
-        onLanguageChange: vi.fn()
+        onLanguageChange: vi.fn(),
+        engineType: 'local' as const,
+        onEngineTypeChange: vi.fn()
     };
 
     it('renders correctly with default props', () => {

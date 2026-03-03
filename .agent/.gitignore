@@ -1,0 +1,44 @@
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Generated Reports
+validation-report-*.md
+
+# Python
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Temp files
+*.tmp
+*.temp
+
+# Node (if applicable)
+node_modules/
+
+# Maestro state (template exists, actual state is local)
+.maestro.state.json
+
+# Runtime state directories (agent queue, history — not for version control)
+.guardian/

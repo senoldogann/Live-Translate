@@ -23,6 +23,9 @@ interface ControlBarProps {
     showOriginal: boolean;
     opacity: number;
     fontSize: number;
+    isStreaming: boolean;
+    language: 'en' | 'fi' | 'tr';
+    engineType: 'local' | 'cloud';
     onToggleListening: () => void;
     onToggleStealth: () => void;
     onToggleOriginal: () => void;
@@ -32,10 +35,9 @@ interface ControlBarProps {
     onShowHistory: () => void;
     onToggleVisible: () => void;
     onQuit: () => void;
-    isStreaming: boolean;
     onToggleStreaming: () => void;
-    language: 'en' | 'fi';
-    onLanguageChange: (lang: 'en' | 'fi') => void;
+    onLanguageChange: (lang: 'en' | 'fi' | 'tr') => void;
+    onEngineTypeChange: (type: 'local' | 'cloud') => void;
 }
 
 // Icons (inline SVG for bundle size)
@@ -150,6 +152,8 @@ function ControlBar({
     onToggleStreaming,
     language,
     onLanguageChange,
+    engineType,
+    onEngineTypeChange,
 }: ControlBarProps) {
     const [isDragging, setIsDragging] = useState(false);
     const dragStartPos = useRef({ x: 0, y: 0 });
@@ -250,11 +254,24 @@ function ControlBar({
                 <select
                     className="select-lang"
                     value={language}
-                    onChange={(e) => onLanguageChange(e.target.value as 'en' | 'fi')}
+                    onChange={(e) => onLanguageChange(e.target.value as 'en' | 'fi' | 'tr')}
                     aria-label="Kaynak Dil Seçimi"
                 >
                     <option value="en">🇬🇧 EN</option>
+                    <option value="tr">🇹🇷 TR</option>
                     <option value="fi">🇫🇮 FI</option>
+                </select>
+
+                {/* Engine Selector */}
+                <select
+                    className="select-lang"
+                    value={engineType}
+                    onChange={(e) => onEngineTypeChange(e.target.value as 'local' | 'cloud')}
+                    aria-label="Motor Seçimi"
+                    style={{ marginLeft: '4px' }}
+                >
+                    <option value="local">💻 Yerel</option>
+                    <option value="cloud">☁️ Bulut</option>
                 </select>
 
                 {/* Divider */}
