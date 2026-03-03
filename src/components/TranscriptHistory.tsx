@@ -12,6 +12,7 @@ interface TranscriptEntry {
     original: string;
     translated: string;
     timestamp: number;
+    isFinal?: boolean;
 }
 
 interface TranscriptHistoryProps {
@@ -21,7 +22,8 @@ interface TranscriptHistoryProps {
 }
 
 function formatTime(timestamp: number): string {
-    const date = new Date(timestamp * 1000);
+    const normalized = timestamp > 1_000_000_000_000 ? timestamp : timestamp * 1000;
+    const date = new Date(normalized);
     const hours = date.getHours().toString().padStart(2, '0');
     const minutes = date.getMinutes().toString().padStart(2, '0');
     return `${hours}:${minutes}`;
@@ -70,16 +72,19 @@ function TranscriptHistory({ isOpen, transcripts, onClose }: TranscriptHistoryPr
                             ) : (
                                 <div className="transcript-list">
                                     {transcripts.map((entry) => (
-                                        <div key={entry.id} className="transcript-item">
+                                        <div
+                                            key={entry.id}
+                                            className={`transcript-item ${entry.isFinal === false ? 'is-partial' : ''}`}
+                                        >
                                             <div className="transcript-time">
                                                 {formatTime(entry.timestamp)}
                                             </div>
                                             <div className="transcript-texts">
                                                 <div className="transcript-original">
-                                                    {entry.original}
+                                                    {entry.original}{entry.isFinal === false ? ' ...' : ''}
                                                 </div>
                                                 <div className="transcript-translated">
-                                                    {entry.translated}
+                                                    {entry.translated}{entry.isFinal === false ? ' ...' : ''}
                                                 </div>
                                             </div>
                                         </div>

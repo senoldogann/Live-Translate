@@ -11,7 +11,8 @@
         "build": "tsc && vite build",
         "electron:dev": "vite",
         "electron:build": "npm run build && electron-builder",
-        "python:install": "cd python && /opt/homebrew/opt/python@3.11/bin/python3.11 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt",
+        "oss:start": "bash scripts/run_open_source.sh",
+        "python:install": "bash scripts/run_open_source.sh --setup-only",
         "python:engine": "source python/.venv/bin/activate && python python/engine.py",
         "start": "npm run electron:dev",
         "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
@@ -44,6 +45,9 @@
     "build": {
         "appId": "com.stealth.subtitle.translator",
         "productName": "Stealth Subtitle Translator",
+        "directories": {
+            "output": "release"
+        },
         "mac": {
             "category": "public.app-category.productivity",
             "target": [
@@ -68,11 +72,16 @@
                 "filter": [
                     "**/*",
                     "!**/__pycache__",
+                    "!**/.pytest_cache/**",
+                    "!**/{test,tests,testing,example,examples,doc,docs}/**",
                     "!**/*.pyc",
                     "!**/*.pyo",
                     "!**/*.pyd",
+                    "!**/*.dist-info/RECORD",
                     "!.venv/bin/pip*",
-                    "!.venv/bin/activate*"
+                    "!.venv/bin/activate*",
+                    "!.venv/bin/idle3*",
+                    "!.venv/bin/python*-config"
                 ]
             }
         ]

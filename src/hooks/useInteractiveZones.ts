@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 interface UseInteractiveZonesProps {
     showControlBar: boolean;
     showHistory: boolean;
+    fullWindowInteractive?: boolean;
     bottomSectionRef: React.RefObject<HTMLDivElement>;
     restoreBtnRef: React.RefObject<HTMLButtonElement>;
     subtitleCount: number;
@@ -14,6 +15,7 @@ interface UseInteractiveZonesProps {
 export function useInteractiveZones({
     showControlBar,
     showHistory,
+    fullWindowInteractive = false,
     bottomSectionRef,
     restoreBtnRef,
     subtitleCount
@@ -23,6 +25,12 @@ export function useInteractiveZones({
 
         const updateZones = () => {
             const zones = [];
+
+            if (fullWindowInteractive) {
+                zones.push({ x: 0, y: 0, width: 9999, height: 9999 });
+                window.electronAPI.updateInteractiveZones(zones);
+                return;
+            }
 
             // 1. Bottom Section (Control Bar)
             if (showControlBar && bottomSectionRef.current) {
@@ -74,5 +82,5 @@ export function useInteractiveZones({
         const interval = setInterval(updateZones, 500);
 
         return () => clearInterval(interval);
-    }, [showControlBar, showHistory, bottomSectionRef, restoreBtnRef, subtitleCount]);
+    }, [showControlBar, showHistory, fullWindowInteractive, bottomSectionRef, restoreBtnRef, subtitleCount]);
 }

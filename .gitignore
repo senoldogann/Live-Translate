@@ -8,11 +8,14 @@ dist/
 dist-electron/
 out/
 build/
+release/
 
 # Python
 python/__pycache__/
 python/*.pyc
 python/.venv/
+.pytest_cache/
+scripts/__pycache__/
 *.egg-info/
 
 # Whisper models (large files)

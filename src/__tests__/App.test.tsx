@@ -20,7 +20,23 @@ vi.mock('../components/SiriWave', () => ({
 
 // Mock ControlBar to simplify testing
 vi.mock('../components/ControlBar', () => ({
-    default: () => <div data-testid="control-bar" />
+    default: ({
+        onToggleListening,
+        onShowHistory,
+    }: {
+        onToggleListening: () => void;
+        onShowHistory: () => void;
+    }) => (
+        <div>
+            <button data-testid="toggle-listening" onClick={onToggleListening}>
+                Toggle Listening
+            </button>
+            <button data-testid="toggle-history" onClick={onShowHistory}>
+                Toggle History
+            </button>
+            <div data-testid="control-bar" />
+        </div>
+    )
 }));
 
 // Mock SetupWizard to avoid setup flow in tests
@@ -30,14 +46,18 @@ vi.mock('../components/SetupWizard', () => ({
 
 // Mock useInteractiveZones hook
 vi.mock('../hooks/useInteractiveZones', () => ({
-    useInteractiveZones: () => {}
+    useInteractiveZones: () => { }
 }));
 
 describe('App Component', () => {
-    let mockOnTranscriptUpdate: any;
+    let mockOnTranscriptUpdate: (data: any) => void;
+    let mockOnEngineReady: () => void;
+    let mockOnHistoryWindowState: ((isOpen: boolean) => void) | undefined;
 
     beforeEach(() => {
         mockOnTranscriptUpdate = vi.fn();
+        mockOnEngineReady = vi.fn();
+        mockOnHistoryWindowState = undefined;
 
         // Mock window.electronAPI
         window.electronAPI = {
@@ -52,6 +72,7 @@ describe('App Component', () => {
             setWindowHeight: vi.fn(),
             toggleStealth: vi.fn(),
             setOpacity: vi.fn(),
+            setListening: vi.fn(),
             setStreamingMode: vi.fn(),
             getAppInfo: vi.fn().mockResolvedValue({} as any),
             moveWindow: vi.fn(),
@@ -62,10 +83,26 @@ describe('App Component', () => {
             setLanguage: vi.fn(),
             setEngineType: vi.fn(),
             openHistoryWindow: vi.fn(),
+            updateHistoryWindow: vi.fn(),
             getConfig: vi.fn().mockResolvedValue({ isSetupComplete: true }),
             saveConfig: vi.fn().mockResolvedValue(true),
+            validateApiKeys: vi.fn().mockResolvedValue({
+                ok: true,
+                deepgram: { ok: true, message: 'ok' },
+                deepl: { ok: true, message: 'ok' },
+            }),
             checkBlackhole: vi.fn().mockResolvedValue(true),
-            openUrl: vi.fn()
+            openUrl: vi.fn(),
+            onEngineReady: vi.fn((cb) => {
+                mockOnEngineReady = cb;
+                return vi.fn();
+            }),
+            onShowControlBar: vi.fn().mockReturnValue(vi.fn()),
+            onEngineLog: vi.fn().mockReturnValue(vi.fn()),
+            onHistoryWindowState: vi.fn((cb) => {
+                mockOnHistoryWindowState = cb;
+                return vi.fn();
+            }),
         };
     });
 
@@ -118,5 +155,82 @@ describe('App Component', () => {
 
         expect(screen.getByText('Merhaba Dünya.')).toBeInTheDocument();
         expect(screen.getByTestId('final-status')).toHaveTextContent('FINAL');
+    });
+
+    it('replays current engine settings after the backend restarts', async () => {
+        render(<App />);
+
+        await screen.findByTestId('siri-wave', {}, { timeout: 1000 });
+
+        act(() => {
+            mockOnEngineReady();
+        });
+
+        expect(window.electronAPI.setLanguage).toHaveBeenCalledWith('en');
+        expect(window.electronAPI.setStreamingMode).toHaveBeenCalledWith(false);
+        expect(window.electronAPI.setEngineType).toHaveBeenCalledWith('local');
+        expect(window.electronAPI.toggleStealth).toHaveBeenCalledWith(false);
+    });
+
+    it('sends a real listening command when pause is toggled', async () => {
+        render(<App />);
+
+        await screen.findByTestId('siri-wave', {}, { timeout: 1000 });
+
+        act(() => {
+            screen.getByTestId('toggle-listening').click();
+        });
+
+        expect(window.electronAPI.setListening).toHaveBeenCalledWith(false);
+    });
+
+    it('opens the native history window and streams live partial plus final updates into it', async () => {
+        render(<App />);
+
+        await screen.findByTestId('siri-wave', {}, { timeout: 1000 });
+
+        act(() => {
+            screen.getByTestId('toggle-history').click();
+        });
+
+        expect(window.electronAPI.openHistoryWindow).toHaveBeenCalledWith([]);
+
+        act(() => {
+            mockOnHistoryWindowState?.(true);
+        });
+
+        act(() => {
+            mockOnTranscriptUpdate({
+                original: 'Live sentence',
+                translated: 'Canli cumle (canli)',
+                isFinal: false,
+                timestamp: 1003,
+            });
+        });
+
+        expect(window.electronAPI.updateHistoryWindow).toHaveBeenLastCalledWith([
+            expect.objectContaining({
+                original: 'Live sentence',
+                translated: 'Canli cumle (canli)',
+                isFinal: false,
+            }),
+        ]);
+
+        act(() => {
+            mockOnTranscriptUpdate({
+                original: 'Live sentence',
+                translated: 'Canli cumle',
+                isFinal: true,
+                timestamp: 1004,
+            });
+        });
+
+        expect(window.electronAPI.updateHistoryWindow).toHaveBeenLastCalledWith([
+            expect.objectContaining({
+                original: 'Live sentence',
+                translated: 'Canli cumle',
+                isFinal: true,
+            }),
+        ]);
     });
 });

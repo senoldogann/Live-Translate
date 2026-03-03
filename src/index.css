@@ -557,6 +557,7 @@ body {
     z-index: 1000;
     backdrop-filter: blur(4px);
     -webkit-app-region: no-drag;
+    pointer-events: auto;
 }
 
 .transcript-history-panel {
@@ -571,6 +572,7 @@ body {
     position: relative;
     /* Z-index için gerekli */
     z-index: 1010;
+    pointer-events: auto;
 }
 
 .transcript-history-header {
@@ -625,6 +627,7 @@ body {
     padding: var(--spacing-md);
     -webkit-app-region: no-drag;
     -webkit-overflow-scrolling: touch;
+    pointer-events: auto;
 }
 
 .transcript-empty {
@@ -646,6 +649,11 @@ body {
     background: var(--color-bg-glass);
     border-radius: var(--radius-md);
     border: 1px solid var(--color-border);
+}
+
+.transcript-item.is-partial {
+    opacity: 0.82;
+    border-style: dashed;
 }
 
 .transcript-time {

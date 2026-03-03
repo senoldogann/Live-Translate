@@ -1,142 +1,540 @@
 """
-Deepgram Nova-2 WebSocket Streaming Client
+Deepgram SDK v6 Streaming Client (Listen v1).
 
-Ayrı bir thread'de asyncio event loop çalıştırır.
-Ses verisi float32 numpy array'den linear16 PCM byte'a dönüştürülerek
-WebSocket üzerinden Deepgram'a gönderilir.
+Cloud STT is fast enough already. The real bottleneck is turning those fast
+segments into stable Turkish output. This client now:
 
-Transkript geldiğinde TranslationEngine aracılığıyla çevrilir
-ve ZmqPublisher üzerinden Electron'a iletilir.
+1. Buffers finalized Deepgram segments instead of treating every frame as a
+   full sentence.
+2. Commits a final utterance only on speech-final or UtteranceEnd events.
+3. Moves translation work off the websocket callback thread.
+4. Drops stale preview translations when fresher segments arrive.
 """
 
 import os
-import json
 import time
 import threading
-import asyncio
-import websockets
+from collections import deque
+from dataclasses import dataclass
+from queue import Empty, Queue
+from typing import Optional
+
+from deepgram import DeepgramClient
+from deepgram.core.events import EventType
+
+
+@dataclass
+class TranslationJob:
+    job_id: int
+    text: str
+    confidence: float
+    is_final: bool
+    context: str
 
 
 class DeepgramWSClient:
     """
-    Deepgram Nova-2 WebSocket streaming client.
-    publisher  : ZmqPublisher — sonuçları Electron'a iletir
-    translator : TranslationEngine — metni hedef dile çevirir
+    Deepgram Nova-3 real-time streaming client built on SDK v6.
+
+    publisher  : ZmqPublisher  — forwards results to Electron
+    translator : TranslationEngine — translates transcript to target language
     """
 
-    DEEPGRAM_URL = (
-        "wss://api.deepgram.com/v1/listen"
-        "?model=nova-2"
-        "&encoding=linear16"
-        "&sample_rate=16000"
-        "&channels=1"
-        "&interim_results=true"
-        "&endpointing=500"
-        "&punctuate=true"
-    )
-
     def __init__(self, publisher, translator=None):
-        self.api_key  = os.getenv("DEEPGRAM_API_KEY", "")
-        self.publisher  = publisher
+        self.api_key: str = os.getenv("DEEPGRAM_API_KEY", "")
+        self.publisher = publisher
         self.translator = translator
+        self.source_lang: str = "en"
+        self.streaming_mode: bool = False
 
-        self._running = False
-        self._loop:   asyncio.AbstractEventLoop | None = None
-        self._thread: threading.Thread | None = None
-        self._ws = None
+        self._running: bool = False
+        self._client: Optional[DeepgramClient] = None
+        # Protected by _conn_lock; written from daemon thread, read from audio thread
+        self._connection = None
+        self._conn_lock = threading.Lock()
+        self._listen_thread: Optional[threading.Thread] = None
+        self._keepalive_thread: Optional[threading.Thread] = None
+        self._translation_thread: Optional[threading.Thread] = None
+        self._keepalive_interval_s: float = 3.0
+        self._last_audio_sent_at: float = 0.0
+
+        # Translation stabilization state
+        self._segment_lock = threading.Lock()
+        self._current_segments: list[str] = []
+        self._recent_context: deque[str] = deque(maxlen=3)
+        self._last_preview_source: str = ""
+        self._last_final_source: str = ""
+
+        # Async translation queue (prevents websocket callback stalls)
+        self._translation_queue: Queue[Optional[TranslationJob]] = Queue()
+        self._job_counter = 0
+        self._latest_preview_job_id = -1
+        self._latest_final_job_id = -1
+
+        # Readability tuning: shorter committed chunks so the user can follow
+        # along while the speaker keeps talking.
+        self._soft_commit_min_words = 6
+        self._soft_commit_min_chars = 42
+        self._terminal_punctuation = (".", "!", "?", "…", ":", ";")
 
     # ── Public API ──────────────────────────────────────────────────────────
 
-    def start(self):
+    def start(self, language: str = "en") -> None:
+        """Open a new WebSocket connection to Deepgram."""
         if self._running:
-            return
+            if self.source_lang != language:
+                print(
+                    f"[Deepgram] Language changed ({self.source_lang} -> {language}), restarting..."
+                )
+                self.stop()
+            else:
+                return  # Already running with the same language
+
         if not self.api_key:
-            print("[Deepgram] UYARI: DEEPGRAM_API_KEY ayarlanmamış — bulut modu devre dışı.")
+            print(
+                "[Deepgram] WARNING: DEEPGRAM_API_KEY is not set — cloud engine disabled."
+            )
             return
+
+        self.source_lang = language
         self._running = True
-        self._thread  = threading.Thread(target=self._run_loop, daemon=True, name="deepgram-ws")
-        self._thread.start()
+        self._last_audio_sent_at = time.monotonic()
+        self._client = DeepgramClient(api_key=self.api_key)
+        self._translation_queue = Queue()
+        self._job_counter = 0
+        self._latest_preview_job_id = -1
+        self._latest_final_job_id = -1
+        self._reset_utterance_state(clear_context=False)
 
-    def send_audio(self, audio_bytes: bytes):
-        """float32 numpy array'den dönüştürülmüş PCM16 byte'ları gönder."""
-        if self._ws and self._loop and self._running:
-            asyncio.run_coroutine_threadsafe(self._ws.send(audio_bytes), self._loop)
+        print(
+            f"[Deepgram] Starting SDK v6 (model=nova-3, language={self.source_lang})..."
+        )
 
-    def stop(self):
+        self._translation_thread = threading.Thread(
+            target=self._translation_loop,
+            daemon=True,
+            name="deepgram-translate",
+        )
+        self._translation_thread.start()
+
+        # _connection_loop blocks on start_listening(); run in a daemon thread
+        self._listen_thread = threading.Thread(
+            target=self._connection_loop,
+            daemon=True,
+            name="deepgram-listen",
+        )
+        self._listen_thread.start()
+
+        # Deepgram closes idle websocket streams after ~10s without audio.
+        # KeepAlive frames keep the stream reusable through normal pauses.
+        self._keepalive_thread = threading.Thread(
+            target=self._keepalive_loop,
+            daemon=True,
+            name="deepgram-keepalive",
+        )
+        self._keepalive_thread.start()
+
+    def send_audio(self, audio_bytes: bytes) -> None:
+        """Send raw PCM-16 LE bytes to the open WebSocket connection."""
+        with self._conn_lock:
+            conn = self._connection
+        if conn is not None and self._running:
+            try:
+                conn.send_media(audio_bytes)
+                self._last_audio_sent_at = time.monotonic()
+            except Exception as e:
+                print(f"[Deepgram] Audio send error: {e}")
+
+    def stop(self) -> None:
+        """Close the WebSocket connection and stop the listener thread."""
         self._running = False
-        if self._ws and self._loop:
-            asyncio.run_coroutine_threadsafe(self._ws.close(), self._loop)
-        if self._thread:
-            self._thread.join(timeout=3)
-        print("[Deepgram] Durduruldu.")
+
+        with self._conn_lock:
+            conn = self._connection
+        if conn is not None:
+            try:
+                conn.send_finalize()
+            except Exception:
+                pass
+
+            try:
+                conn.send_close_stream()
+            except Exception:
+                pass
+
+            try:
+                # Fallback for immediate teardown if the server has not yet
+                # closed the socket after CloseStream.
+                conn._websocket.close()
+            except Exception:
+                pass  # Connection may already be closed
+
+        if self._translation_thread is not None:
+            try:
+                self._translation_queue.put_nowait(None)
+            except Exception:
+                pass
+            self._translation_thread.join(timeout=3.0)
+            self._translation_thread = None
+
+        if self._listen_thread is not None:
+            self._listen_thread.join(timeout=3.0)
+            self._listen_thread = None
+
+        if self._keepalive_thread is not None:
+            self._keepalive_thread.join(timeout=3.0)
+            self._keepalive_thread = None
+
+        with self._conn_lock:
+            self._connection = None
+
+        self._client = None
+        self._reset_utterance_state(clear_context=True)
+        print("[Deepgram] Stopped.")
+
+    def update_api_key(self, new_key: str) -> None:
+        """Swap in a new Deepgram API key; restart if currently streaming."""
+        if not new_key or new_key == self.api_key:
+            return
+        print("[Deepgram] Updating API key...")
+        self.api_key = new_key
+        if self._running:
+            self.stop()
+            self.start(self.source_lang)
 
     # ── Internal ────────────────────────────────────────────────────────────
 
-    def _run_loop(self):
-        self._loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self._loop)
+    def _reset_utterance_state(self, clear_context: bool) -> None:
+        with self._segment_lock:
+            self._current_segments.clear()
+            self._last_preview_source = ""
+            self._last_final_source = ""
+            if clear_context:
+                self._recent_context.clear()
+
+    def _connection_loop(self) -> None:
+        """
+        Runs inside the daemon thread.
+
+        Opens a Listen v1 WebSocket, registers event handlers, then blocks on
+        start_listening() until the stream is closed locally or by the server.
+        """
+        if self._client is None:
+            return
+
         try:
-            self._loop.run_until_complete(self._ws_loop())
+            with self._client.listen.v1.connect(
+                model="nova-3",
+                language=self.source_lang,
+                smart_format="true",
+                punctuate="true",
+                encoding="linear16",
+                channels="1",
+                sample_rate="16000",
+                interim_results="true",
+                utterance_end_ms="1000",
+                vad_events="true",
+                endpointing="500",
+            ) as connection:
+                with self._conn_lock:
+                    self._connection = connection
+
+                connection.on(EventType.OPEN, self._on_open)
+                connection.on(EventType.MESSAGE, self._on_message)
+                connection.on(EventType.ERROR, self._on_error)
+                connection.on(EventType.CLOSE, self._on_close)
+
+                # Blocks until the server closes the socket or stop() closes it
+                connection.start_listening()
+
+        except Exception as e:
+            print(f"[Deepgram] Connection error: {e}")
         finally:
-            self._loop.close()
-            self._loop = None
+            with self._conn_lock:
+                self._connection = None
+            self._running = False
 
-    async def _ws_loop(self):
-        headers = {"Authorization": f"Token {self.api_key}"}
-        try:
-            async with websockets.connect(
-                self.DEEPGRAM_URL,
-                extra_headers=headers,
-                ping_interval=20,
-                ping_timeout=10,
-            ) as ws:
-                self._ws = ws
-                print("[Deepgram] WebSocket bağlantısı kuruldu — gerçek zamanlı dinleme başladı.")
-                try:
-                    while self._running:
-                        msg = await ws.recv()
-                        self._handle_message(msg)
-                except websockets.exceptions.ConnectionClosed as exc:
-                    print(f"[Deepgram] Bağlantı kapandı: {exc.code} {exc.reason}")
-        except Exception as exc:
-            print(f"[Deepgram] Bağlantı hatası: {exc}")
-        finally:
-            self._ws = None
+    def _keepalive_loop(self) -> None:
+        """Send KeepAlive during silent periods so the server does not time out."""
+        while self._running:
+            time.sleep(self._keepalive_interval_s)
 
-    def _handle_message(self, raw: str):
-        try:
-            data     = json.loads(raw)
-            is_final = data.get("is_final", False)
-            channel  = data.get("channel", {})
-            alts     = channel.get("alternatives", [])
-
-            if not alts:
+            if not self._running:
                 return
 
-            transcript = alts[0].get("transcript", "").strip()
-            confidence = alts[0].get("confidence", 0.99)
+            if (
+                time.monotonic() - self._last_audio_sent_at
+                < self._keepalive_interval_s
+            ):
+                continue
 
+            with self._conn_lock:
+                conn = self._connection
+
+            if conn is None:
+                continue
+
+            try:
+                conn.send_keep_alive()
+            except Exception as exc:
+                print(f"[Deepgram] KeepAlive error: {exc}")
+
+    def _translation_loop(self) -> None:
+        """Process translation jobs away from the websocket callback thread."""
+        while self._running:
+            try:
+                job = self._translation_queue.get(timeout=0.25)
+            except Empty:
+                continue
+
+            if job is None:
+                return
+
+            if not job.is_final and job.job_id != self._latest_preview_job_id:
+                continue
+
+            if job.is_final and job.job_id != self._latest_final_job_id:
+                continue
+
+            translated = job.text
+
+            if self.translator is not None:
+                try:
+                    result = self.translator.translate(
+                        job.text,
+                        context=job.context,
+                        prefer_quality=job.is_final,
+                    )
+                    if result:
+                        translated = result
+                except Exception as exc:
+                    print(f"[Deepgram] Translation error: {exc}")
+
+            if not self._running:
+                continue
+
+            if not job.is_final and job.job_id != self._latest_preview_job_id:
+                continue
+
+            if job.is_final and job.job_id != self._latest_final_job_id:
+                continue
+
+            if self.publisher is not None:
+                print(
+                    f"[Transcript] cloud {'FINAL' if job.is_final else 'PREVIEW'} "
+                    f"({getattr(self.translator, 'last_provider', 'passthrough')}): "
+                    f"'{job.text[:80]}'"
+                )
+                self.publisher.publish(
+                    {
+                        "original": job.text,
+                        "translated": translated.strip(),
+                        "isFinal": job.is_final,
+                        "confidence": job.confidence,
+                        "source": "cloud",
+                        "translationProvider": getattr(
+                            self.translator, "last_provider", "passthrough"
+                        ),
+                        "timestamp": time.time(),
+                    }
+                )
+
+            if job.is_final:
+                with self._segment_lock:
+                    self._recent_context.append(job.text)
+                    self._last_preview_source = ""
+
+    def _build_context(self) -> str:
+        with self._segment_lock:
+            if not self._recent_context:
+                return ""
+            return " ".join(self._recent_context)
+
+    def _coalesce_segments(self) -> str:
+        return " ".join(
+            segment.strip() for segment in self._current_segments if segment.strip()
+        ).strip()
+
+    def _enqueue_translation(
+        self,
+        text: str,
+        confidence: float,
+        is_final: bool,
+        context: str,
+    ) -> None:
+        if not text.strip():
+            return
+
+        self._job_counter += 1
+        job = TranslationJob(
+            job_id=self._job_counter,
+            text=text.strip(),
+            confidence=confidence,
+            is_final=is_final,
+            context=context,
+        )
+
+        if is_final:
+            self._latest_final_job_id = job.job_id
+            self._latest_preview_job_id = -1
+        else:
+            self._latest_preview_job_id = job.job_id
+
+        self._translation_queue.put(job)
+
+    def _should_soft_commit(self, text: str) -> bool:
+        normalized = text.strip()
+        if not normalized:
+            return False
+
+        words = normalized.split()
+        if normalized.endswith(self._terminal_punctuation):
+            return True
+
+        if len(words) >= self._soft_commit_min_words:
+            return True
+
+        if len(normalized) >= self._soft_commit_min_chars:
+            return True
+
+        return False
+
+    def _emit_preview_or_finalize(
+        self,
+        transcript: str,
+        confidence: float,
+        speech_final: bool,
+    ) -> None:
+        normalized = transcript.strip()
+        if not normalized:
+            return
+
+        should_emit_final = False
+        should_emit_preview = False
+        combined = ""
+
+        with self._segment_lock:
+            if not self._current_segments or self._current_segments[-1] != normalized:
+                self._current_segments.append(normalized)
+
+            combined = self._coalesce_segments()
+            if not combined:
+                return
+
+            should_emit_final = speech_final or self._should_soft_commit(combined)
+
+            if should_emit_final:
+                if combined == self._last_final_source:
+                    self._current_segments.clear()
+                    self._last_preview_source = ""
+                    return
+
+                self._last_final_source = combined
+                self._current_segments.clear()
+                self._last_preview_source = ""
+            elif self.streaming_mode and combined != self._last_preview_source:
+                self._last_preview_source = combined
+                should_emit_preview = True
+            else:
+                return
+
+        context = self._build_context()
+
+        if should_emit_final:
+            self._enqueue_translation(
+                combined,
+                confidence=confidence,
+                is_final=True,
+                context=context,
+            )
+        elif should_emit_preview:
+            self._enqueue_translation(
+                combined,
+                confidence=confidence,
+                is_final=False,
+                context=context,
+            )
+
+    def _flush_buffered_utterance(self) -> None:
+        with self._segment_lock:
+            combined = self._coalesce_segments()
+            if not combined:
+                return
+
+            if combined == self._last_final_source:
+                self._current_segments.clear()
+                self._last_preview_source = ""
+                return
+
+            self._last_final_source = combined
+            self._current_segments.clear()
+            self._last_preview_source = ""
+
+        self._enqueue_translation(
+            combined,
+            confidence=0.0,
+            is_final=True,
+            context=self._build_context(),
+        )
+
+    # ── Event handlers ──────────────────────────────────────────────────────
+
+    def _on_open(self, *args, **kwargs) -> None:
+        print("[Deepgram] WebSocket connected — SDK v6 active.")
+
+    def _on_message(self, *args, **kwargs) -> None:
+        """
+        Called for every server message. We intentionally ignore unstable interim
+        frames and only emit previews from finalized segments.
+        """
+        try:
+            message = args[0] if args else kwargs.get("message")
+            if message is None:
+                return
+
+            message_type = getattr(message, "type", None)
+
+            if message_type == "UtteranceEnd":
+                last_word_end = getattr(message, "last_word_end", 0)
+                if isinstance(last_word_end, (int, float)) and last_word_end < 0:
+                    return
+                self._flush_buffered_utterance()
+                return
+
+            if message_type != "Results":
+                return
+
+            alternatives = getattr(getattr(message, "channel", None), "alternatives", [])
+            if not alternatives:
+                return
+
+            first_alternative = alternatives[0]
+            transcript = getattr(first_alternative, "transcript", "").strip()
             if not transcript:
                 return
 
-            # Çeviri
-            translated = transcript
-            if self.translator:
-                try:
-                    translated = self.translator.translate(transcript) or transcript
-                except Exception as exc:
-                    print(f"[Deepgram] Çeviri hatası: {exc}")
+            if not getattr(message, "is_final", False):
+                # Interims are intentionally ignored; they are too unstable for
+                # meaningful Turkish subtitles and create churn.
+                return
 
-            # Yayın
-            if self.publisher:
-                result = {
-                    "original":   transcript,
-                    "translated": translated.strip(),
-                    "isFinal":    is_final,
-                    "confidence": confidence,
-                    "timestamp":  time.time(),
-                }
-                self.publisher.publish(result)
+            confidence = getattr(first_alternative, "confidence", 0.0)
+            speech_final = bool(getattr(message, "speech_final", False))
 
-        except Exception as exc:
-            print(f"[Deepgram] Mesaj işleme hatası: {exc}")
+            self._emit_preview_or_finalize(
+                transcript=transcript,
+                confidence=confidence,
+                speech_final=speech_final,
+            )
+
+        except Exception as e:
+            print(f"[Deepgram] Message handling error: {e}")
+
+    def _on_error(self, *args, **kwargs) -> None:
+        error = args[0] if args else kwargs.get("error", "unknown error")
+        print(f"[Deepgram] WebSocket error: {error}")
+
+    def _on_close(self, *args, **kwargs) -> None:
+        if self._running:
+            # Server closed the connection unexpectedly; surface it for debugging
+            print("[Deepgram] Connection closed by server.")

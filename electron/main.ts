@@ -11,6 +11,7 @@ import { spawn, ChildProcess, exec } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import { promisify } from 'util';
+import { URL } from 'url';
 
 const execAsync = promisify(exec);
 import { fileURLToPath } from 'url';
@@ -27,21 +28,400 @@ const __dirname = path.dirname(__filename);
 // ZeroMQ import (dynamic to handle native module)
 let zmq: typeof import('zeromq') | null = null;
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// TYPE DEFINITIONS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface InteractiveZone {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
+
+interface SetupConfig {
+    isSetupComplete: boolean;
+    language?: string;
+    engineType?: 'local' | 'cloud';
+    wordByWord?: boolean;
+    deepgramKey?: string;
+    deeplKey?: string;
+}
+
+interface ApiKeyValidationStatus {
+    ok: boolean;
+    message: string;
+}
+
+interface ApiKeyValidationResult {
+    ok: boolean;
+    deepgram: ApiKeyValidationStatus;
+    deepl: ApiKeyValidationStatus;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECURITY: URL Whitelist for shell.openExternal
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const ALLOWED_EXTERNAL_HOSTS = [
+    'existential.audio',
+    'console.deepgram.com',
+    'www.deepl.com',
+    'deepl.com',
+    'github.com',
+    'docs.github.com',
+];
+
+function isSafeExternalUrl(urlString: string): boolean {
+    try {
+        const url = new URL(urlString);
+        return (
+            (url.protocol === 'https:' || url.protocol === 'http:') &&
+            ALLOWED_EXTERNAL_HOSTS.some(host => url.hostname === host || url.hostname.endsWith(`.${host}`))
+        );
+    } catch {
+        return false;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECURITY: Config Schema Validation
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const VALID_CONFIG_KEYS = new Set([
+    'isSetupComplete',
+    'setupComplete',
+    'language',
+    'engineType',
+    'wordByWord',
+    'deepgramKey',
+    'deeplKey',
+]);
+
+function isValidConfig(config: unknown) {
+    if (typeof config !== 'object' || config === null || Array.isArray(config)) return false;
+    const obj = config as Record<string, unknown>;
+
+    // Only allow known keys
+    for (const key of Object.keys(obj)) {
+        if (!VALID_CONFIG_KEYS.has(key)) return false;
+    }
+
+    return true;
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 5000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+        return await fetch(url, {
+            ...init,
+            signal: controller.signal,
+        });
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+async function readErrorMessage(response: Response, fallback: string) {
+    try {
+        const raw = await response.text();
+        if (!raw) return fallback;
+
+        try {
+            const parsed = JSON.parse(raw);
+            if (typeof parsed?.message === 'string') return parsed.message;
+            if (typeof parsed?.err_msg === 'string') return parsed.err_msg;
+            if (typeof parsed?.detail === 'string') return parsed.detail;
+        } catch {
+            // Non-JSON error body
+        }
+
+        return raw.slice(0, 180);
+    } catch {
+        return fallback;
+    }
+}
+
+async function validateDeepgramKey(key?: string): Promise<ApiKeyValidationStatus> {
+    if (!key?.trim()) {
+        return {
+            ok: true,
+            message: 'Deepgram anahtari bos birakildi.',
+        };
+    }
+
+    try {
+        const response = await fetchWithTimeout('https://api.deepgram.com/v1/auth/token', {
+            method: 'GET',
+            headers: {
+                Authorization: `Token ${key.trim()}`,
+            },
+        });
+
+        if (!response.ok) {
+            const message = await readErrorMessage(
+                response,
+                `Deepgram dogrulamasi basarisiz (${response.status})`,
+            );
+            return { ok: false, message };
+        }
+
+        return {
+            ok: true,
+            message: 'Deepgram anahtari dogrulandi.',
+        };
+    } catch (error) {
+        return {
+            ok: false,
+            message: `Deepgram baglanti hatasi: ${error instanceof Error ? error.message : 'bilinmeyen hata'}`,
+        };
+    }
+}
+
+async function validateDeepLKey(key?: string): Promise<ApiKeyValidationStatus> {
+    if (!key?.trim()) {
+        return {
+            ok: true,
+            message: 'DeepL anahtari bos birakildi.',
+        };
+    }
+
+    const trimmedKey = key.trim();
+    const baseUrl = trimmedKey.endsWith(':fx')
+        ? 'https://api-free.deepl.com'
+        : 'https://api.deepl.com';
+
+    try {
+        const response = await fetchWithTimeout(`${baseUrl}/v2/usage`, {
+            method: 'GET',
+            headers: {
+                Authorization: `DeepL-Auth-Key ${trimmedKey}`,
+            },
+        });
+
+        if (!response.ok) {
+            const message = await readErrorMessage(
+                response,
+                `DeepL dogrulamasi basarisiz (${response.status})`,
+            );
+            return { ok: false, message };
+        }
+
+        return {
+            ok: true,
+            message: 'DeepL anahtari dogrulandi.',
+        };
+    } catch (error) {
+        return {
+            ok: false,
+            message: `DeepL baglanti hatasi: ${error instanceof Error ? error.message : 'bilinmeyen hata'}`,
+        };
+    }
+}
+
 // Global references
 let mainWindow: BrowserWindow | null = null;
 let pythonProcess: ChildProcess | null = null;
 let zmqSubscriber: any = null;
 let commandSock: any = null; // ZMQ Publisher (Streaming komutları için)
-let interactiveZones: { x: number, y: number, width: number, height: number }[] = [];
+let interactiveZones: InteractiveZone[] = [];
 let interactionPollingInterval: NodeJS.Timeout | null = null;
 let isInteractionEnabled = true;
 let hasReceivedZones = false;
 let historyWindow: BrowserWindow | null = null; // Transcript history window
+let latestHistoryTranscripts: unknown[] = [];
+
+const COMMAND_RETRY_COUNT = 3;
+const COMMAND_RETRY_DELAY_MS = 100;
 
 // Environment
 const isDev = !app.isPackaged;
 const VITE_DEV_SERVER_URL = 'http://localhost:5173';
 const ZMQ_ADDRESS = 'tcp://127.0.0.1:5555';
+
+function getPreloadPath() {
+    return isDev
+        ? path.join(process.cwd(), 'electron', 'preload.cjs')
+        : path.join(__dirname, 'preload.js');
+}
+
+function sendHistoryWindowState(isOpen: boolean) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('history-window-state', isOpen);
+    }
+}
+
+function buildHistoryWindowHtml() {
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+  <title>Transcript History</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    body {
+      background: #09090b;
+      color: #f4f4f5;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      padding: 20px;
+    }
+    .shell {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: linear-gradient(180deg, rgba(20,20,24,0.96), rgba(10,10,14,0.98));
+      overflow: hidden;
+    }
+    .header {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 24px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    h1 { font-size: 22px; font-weight: 700; color: #fff; }
+    .meta { font-size: 13px; color: rgba(255,255,255,0.55); }
+    #content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 18px 20px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .entry {
+      display: flex;
+      gap: 18px;
+      padding: 16px 18px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.03);
+      align-items: flex-start;
+    }
+    .entry.is-live {
+      border-color: rgba(167,139,250,0.28);
+      background: rgba(167,139,250,0.08);
+    }
+    .time {
+      color: #a78bfa;
+      font-size: 13px;
+      min-width: 74px;
+      font-variant-numeric: tabular-nums;
+      font-weight: 700;
+      padding-top: 2px;
+    }
+    .texts { flex: 1; min-width: 0; }
+    .original {
+      font-size: 14px;
+      color: rgba(255,255,255,0.5);
+      font-style: italic;
+      margin-bottom: 6px;
+      line-height: 1.45;
+      word-break: break-word;
+    }
+    .translated {
+      font-size: 18px;
+      color: #fff;
+      font-weight: 600;
+      line-height: 1.5;
+      word-break: break-word;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-left: 10px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #e9d5ff;
+      background: rgba(167,139,250,0.16);
+      border: 1px solid rgba(167,139,250,0.22);
+    }
+    .empty {
+      margin: auto;
+      color: rgba(255,255,255,0.35);
+      text-align: center;
+      font-size: 15px;
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="header">
+      <h1>Transcript History</h1>
+      <div id="meta" class="meta">0 entries</div>
+    </div>
+    <div id="content"><div class="empty">No transcripts yet.</div></div>
+  </div>
+  <script>
+    (() => {
+      const content = document.getElementById('content');
+      const meta = document.getElementById('meta');
+
+      const escapeHtml = (value) => String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+
+      const formatTime = (timestamp) => {
+        const normalized = timestamp > 1000000000000 ? timestamp : timestamp * 1000;
+        const date = new Date(normalized);
+        const hh = String(date.getHours()).padStart(2, '0');
+        const mm = String(date.getMinutes()).padStart(2, '0');
+        const ss = String(date.getSeconds()).padStart(2, '0');
+        return \`\${hh}:\${mm}:\${ss}\`;
+      };
+
+      const render = (entries) => {
+        const list = Array.isArray(entries) ? [...entries].reverse() : [];
+        meta.textContent = \`\${list.length} entries\`;
+
+        if (!list.length) {
+          content.innerHTML = '<div class="empty">No transcripts yet.</div>';
+          return;
+        }
+
+        content.innerHTML = list.map((item) => \`
+          <div class="entry \${item.isFinal === false ? 'is-live' : ''}">
+            <div class="time">\${formatTime(item.timestamp)}</div>
+            <div class="texts">
+              <div class="original">
+                \${escapeHtml(item.original)}
+                \${item.isFinal === false ? '<span class="badge">Live</span>' : ''}
+              </div>
+              <div class="translated">\${escapeHtml(item.translated)}</div>
+            </div>
+          </div>
+        \`).join('');
+      };
+
+      if (window.electronAPI?.onHistoryData) {
+        window.electronAPI.onHistoryData(render);
+      }
+    })();
+  </script>
+</body>
+</html>`;
+}
+
+function pushHistoryDataToWindow() {
+    if (historyWindow && !historyWindow.isDestroyed()) {
+        historyWindow.webContents.send('history-data', latestHistoryTranscripts);
+    }
+}
 
 /**
  * Stealth BrowserWindow Konfigürasyonu
@@ -56,22 +436,27 @@ function createStealthWindow(): BrowserWindow {
     // If setup is not complete, show a larger window for the wizard
     let windowHeight = 280;
     try {
-        const configRaw = fs.readFileSync(getSetupConfigPath(), 'utf-8');
-        const setupConfig = JSON.parse(configRaw);
-        if (!setupConfig.setupComplete) {
-            windowHeight = 600; // Wizard height
+        const configPath = getSetupConfigPath();
+        if (fs.existsSync(configPath)) {
+            const configRaw = fs.readFileSync(configPath, 'utf-8');
+            const setupConfig = JSON.parse(configRaw);
+            // Check both new and old key for safety here
+            const finished = setupConfig.isSetupComplete || setupConfig.setupComplete;
+            if (!finished) {
+                windowHeight = 600; // Wizard height
+            }
+        } else {
+            windowHeight = 600; // No config, show wizard
         }
     } catch {
-        windowHeight = 600; // Default to wizard height if config missing
+        windowHeight = 600; // Default to wizard height if error
     }
 
     const windowWidth = Math.min(1000, Math.floor(screenWidth * 0.75));
     const xPosition = Math.floor((screenWidth - windowWidth) / 2);
     const yPosition = screenHeight - windowHeight - 30;
 
-    const preloadPath = isDev
-        ? path.join(process.cwd(), 'electron', 'preload.cjs')
-        : path.join(__dirname, 'preload.js');
+    const preloadPath = getPreloadPath();
 
     const win = new BrowserWindow({
         width: windowWidth,
@@ -173,9 +558,9 @@ function startPythonEngine(): ChildProcess | null {
         proc.stderr?.on('data', (data: Buffer) => {
             const errorMsg = data.toString().trim();
             console.error('[Python Error]', errorMsg);
-            // Log to renderer for debugging in production if needed
+            // Forward to renderer via safe IPC (no executeJavaScript)
             if (mainWindow && !mainWindow.isDestroyed()) {
-                mainWindow.webContents.executeJavaScript(`console.error("Python Stderr: ${errorMsg.replace(/"/g, '\\"')}")`);
+                mainWindow.webContents.send('engine-log', `[Python] ${errorMsg}`);
             }
         });
 
@@ -265,6 +650,38 @@ async function startZmqPublisher(): Promise<void> {
     }
 }
 
+async function broadcastCommand(
+    payload: Record<string, unknown>,
+    label: string,
+    attempts = COMMAND_RETRY_COUNT,
+    delayMs = COMMAND_RETRY_DELAY_MS,
+): Promise<boolean> {
+    if (!commandSock) {
+        console.warn(`[Main] ${label} skipped: command socket not ready`);
+        return false;
+    }
+
+    let sent = false;
+
+    for (let i = 0; i < attempts; i++) {
+        try {
+            await commandSock.send(JSON.stringify(payload));
+            sent = true;
+            if (i === 0) {
+                console.log(`[Main] ${label} sent`);
+            }
+        } catch (err) {
+            console.error(`[Main] ${label} send error:`, err);
+        }
+
+        if (i < attempts - 1) {
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+    }
+
+    return sent;
+}
+
 /**
  * Interaction Polling (macOS Click-Through Fix)
  * 
@@ -306,15 +723,15 @@ function startInteractionPolling() {
         if (shouldEnable !== isInteractionEnabled) {
             if (shouldEnable) {
                 mainWindow.setIgnoreMouseEvents(false);
-                // console.log('[Main] Interaction Enabled');
             } else {
+                // When ignoring, we still want to forward events to a potential overlay underneath,
+                // but Electron's setIgnoreMouseEvents(true, {forward: true}) is the standard way.
                 mainWindow.setIgnoreMouseEvents(true, { forward: true });
-                // console.log('[Main] Interaction Disabled (Click-through)');
             }
             isInteractionEnabled = shouldEnable;
         }
 
-    }, 100); // 100ms polling rate - reduced from 50ms to prevent mouse freeze
+    }, 200); // 200ms polling rate - safer for performance
 }
 
 /**
@@ -349,7 +766,6 @@ function setupIpcHandlers(): void {
         }
     });
 
-    // Pencere yüksekliğini ayarla (Dynamic Resizing)
     // Pencere yüksekliğini ayarla (Dynamic Resizing) - GROW UPWARDS
     ipcMain.on('set-window-height', (_event, height: number) => {
         if (mainWindow) {
@@ -357,24 +773,24 @@ function setupIpcHandlers(): void {
                 const [currentWidth, currentHeight] = mainWindow.getSize();
                 const [currentX, currentY] = mainWindow.getPosition();
 
-                // Minimum yükseklik kontrolü (örn 180px)
+                // Minimum yükseklik kontrolü
                 const newHeight = Math.max(180, height);
-
-                // Yükseklik farkı
                 const heightDiff = newHeight - currentHeight;
 
-                // Eğer yükseklik değişmeyecekse işlem yapma
                 if (Math.abs(heightDiff) < 2) return;
 
-                // Yukarı doğru büyümesi için Y pozisyonunu güncelle
-                // Alt kenar sabit kalmalı: NewY = CurrentY - Diff
+                // GROW UPWARDS: Maintain bottom edge position
+                // NewY = currentY - heightDiff (if height grows by 10, target top moves up by 10)
                 const newY = currentY - heightDiff;
+
+                // Bounds protection: prevent window from going above the screen
+                const safeY = Math.max(0, Math.floor(newY));
 
                 mainWindow.setBounds({
                     x: currentX,
-                    y: newY,
+                    y: safeY,
                     width: currentWidth,
-                    height: newHeight
+                    height: Math.floor(newHeight)
                 });
             } catch (e) {
                 console.error('[Main] Resize error:', e);
@@ -388,20 +804,55 @@ function setupIpcHandlers(): void {
     ipcMain.handle('get-config', () => {
         try {
             const data = fs.readFileSync(getSetupConfigPath(), 'utf8');
-            return JSON.parse(data);
+            const parsed = JSON.parse(data);
+            // Normalize legacy key: setupComplete → isSetupComplete
+            if ('setupComplete' in parsed && !('isSetupComplete' in parsed)) {
+                parsed.isSetupComplete = parsed.setupComplete;
+            }
+            return parsed;
         } catch {
             return { isSetupComplete: false };
         }
     });
 
-    ipcMain.handle('save-config', (_event, config) => {
+    ipcMain.handle('save-config', async (_event, config) => {
+        // Validate config schema before writing to disk
+        if (!isValidConfig(config)) {
+            console.warn('[Main] Invalid config rejected:', JSON.stringify(config));
+            return false;
+        }
         try {
-            fs.writeFileSync(getSetupConfigPath(), JSON.stringify(config));
+            const configPath = getSetupConfigPath();
+            const configDir = path.dirname(configPath);
+            if (!fs.existsSync(configDir)) {
+                fs.mkdirSync(configDir, { recursive: true });
+            }
+            fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+            console.log('[Main] Config saved successfully to:', configPath);
+
+            // Notify Python engine about key updates via ZMQ
+            await broadcastCommand({
+                type: 'update_keys',
+                deepgram: config.deepgramKey,
+                deepl: config.deeplKey
+            }, 'update_keys');
+
             return true;
         } catch (e) {
             console.error('[Main] Failed to save config:', e);
             return false;
         }
+    });
+
+    ipcMain.handle('validate-api-keys', async (_event, keys): Promise<ApiKeyValidationResult> => {
+        const deepgram = await validateDeepgramKey(keys?.deepgramKey);
+        const deepl = await validateDeepLKey(keys?.deeplKey);
+
+        return {
+            ok: deepgram.ok && deepl.ok,
+            deepgram,
+            deepl,
+        };
     });
 
     ipcMain.handle('check-blackhole', async () => {
@@ -418,11 +869,15 @@ function setupIpcHandlers(): void {
         }
     });
 
-    ipcMain.on('open-url', (_event, url) => {
-        console.log('[Main] Opening URL:', url);
-        shell.openExternal(url).catch(err => {
-            console.error('[Main] Failed to open URL:', err);
-        });
+    ipcMain.on('open-url', (_event, url: string) => {
+        if (isSafeExternalUrl(url)) {
+            console.log('[Main] Opening URL:', url);
+            shell.openExternal(url).catch(err => {
+                console.error('[Main] Failed to open URL:', err);
+            });
+        } else {
+            console.warn('[Main] Blocked unsafe external URL:', url);
+        }
     });
 
     // ═══════════════════════════════════════════════════════════════
@@ -430,65 +885,68 @@ function setupIpcHandlers(): void {
     // Streaming Modu Ayarla
     ipcMain.on('set-streaming-mode', (_event, enabled: boolean) => {
         console.log(`[Main] Set streaming mode: ${enabled}`);
-        if (commandSock) {
-            commandSock.send(JSON.stringify({
-                type: 'config',
-                key: 'streaming_mode',
-                value: enabled
-            })).catch((err: any) => console.error('Failed to send config:', err));
-        }
+        void broadcastCommand({
+            type: 'config',
+            key: 'streaming_mode',
+            value: enabled
+        }, 'streaming_mode');
     });
 
-    // Language Change (Dynamic) - with retry for ZMQ slow joiner
+    // Language Change (Dynamic) - retried for ZMQ slow joiner safety
     ipcMain.on('set-language', async (_event, lang: string) => {
         console.log(`[Main] Set language: ${lang}`);
-        if (commandSock) {
-            // Send 3 times with delay to ensure delivery (ZMQ slow joiner fix)
-            for (let i = 0; i < 3; i++) {
-                try {
-                    await commandSock.send(JSON.stringify({
-                        type: 'config',
-                        key: 'source_lang',
-                        value: lang
-                    }));
-                    if (i === 0) console.log(`[Main] Language command sent (attempt ${i + 1})`);
-                } catch (err) {
-                    console.error('Failed to send config:', err);
-                }
-                await new Promise(r => setTimeout(r, 100));
-            }
-        }
+        await broadcastCommand({
+            type: 'config',
+            key: 'source_lang',
+            value: lang
+        }, 'source_lang');
     });
 
     // Engine Type Change (local / cloud)
     ipcMain.on('set-engine-type', async (_event, engineType: string) => {
         console.log(`[Main] Set engine type: ${engineType}`);
-        if (commandSock) {
-            try {
-                await commandSock.send(JSON.stringify({
-                    type: 'config',
-                    key: 'engine_type',
-                    value: engineType
-                }));
-            } catch (err) {
-                console.error('[Main] engine-type send error:', err);
+        await broadcastCommand({
+            type: 'config',
+            key: 'engine_type',
+            value: engineType
+        }, 'engine_type');
+    });
+
+    // Python engine'i yeniden başlat (graceful shutdown + respawn)
+    ipcMain.on('restart-engine', () => {
+        if (pythonProcess) {
+            const pid = pythonProcess.pid;
+            pythonProcess.kill('SIGTERM');
+            // Force kill fallback after 1.5s if still alive
+            if (pid) {
+                setTimeout(() => {
+                    try { process.kill(pid, 'SIGKILL'); } catch { /* already dead */ }
+                }, 1500);
+            }
+        }
+        // Delay respawn to let old process clean up
+        setTimeout(() => {
+            pythonProcess = startPythonEngine();
+        }, 500);
+    });
+
+    // Stealth mode toggle (macOS only — no-op on other platforms)
+    ipcMain.on('toggle-stealth', (_event, enabled: boolean) => {
+        if (mainWindow) {
+            mainWindow.setContentProtection(enabled);
+            if (process.platform !== 'darwin') {
+                console.warn('[Main] setContentProtection is only effective on macOS');
             }
         }
     });
 
-    // Python engine'i yeniden başlat
-    ipcMain.on('restart-engine', () => {
-        if (pythonProcess) {
-            pythonProcess.kill();
-        }
-        pythonProcess = startPythonEngine();
-    });
-
-    // Stealth mode toggle
-    ipcMain.on('toggle-stealth', (_event, enabled: boolean) => {
-        if (mainWindow) {
-            mainWindow.setContentProtection(enabled);
-        }
+    ipcMain.on('set-listening', (_event, enabled: boolean) => {
+        console.log(`[Main] Set listening: ${enabled}`);
+        void broadcastCommand({
+            type: 'config',
+            key: 'is_listening',
+            value: enabled
+        }, 'is_listening');
     });
 
     // Opacity
@@ -517,10 +975,10 @@ function setupIpcHandlers(): void {
         }
     });
 
-    // Open history in a separate native window
+    // Open history in a separate native window (toggle behavior)
     ipcMain.on('open-history-window', (_event, transcripts) => {
-        // Close existing window if already open
-        // Toggle: Close existing window if already open
+        latestHistoryTranscripts = Array.isArray(transcripts) ? transcripts : [];
+
         if (historyWindow && !historyWindow.isDestroyed()) {
             historyWindow.close();
             return;
@@ -529,66 +987,38 @@ function setupIpcHandlers(): void {
         const { width, height } = screen.getPrimaryDisplay().workAreaSize;
 
         historyWindow = new BrowserWindow({
-            width: Math.min(900, Math.floor(width * 0.7)),
-            height: Math.min(700, Math.floor(height * 0.8)),
+            width: Math.min(1600, Math.floor(width * 0.9)),
+            height: Math.min(1100, Math.floor(height * 0.9)),
+            minWidth: Math.min(960, Math.floor(width * 0.75)),
+            minHeight: Math.min(640, Math.floor(height * 0.7)),
             center: true,
             title: 'Transcript History',
-            backgroundColor: '#0f0f0f',
+            backgroundColor: '#09090b',
+            autoHideMenuBar: true,
             webPreferences: {
+                preload: getPreloadPath(),
                 contextIsolation: true,
                 nodeIntegration: false,
                 sandbox: false,
             },
         });
 
-        // Toggle: Close existing window if already open
         historyWindow.webContents.on('did-finish-load', () => {
-            // Safe HTML has been loaded now
+            pushHistoryDataToWindow();
+            sendHistoryWindowState(true);
         });
 
-        // Build history HTML content (newest first = reversed array)
-        const entries = [...transcripts as any[]].reverse().map((t: any) => {
-            const d = new Date(t.timestamp);
-            const timeStr = `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
-            return `
-                <div class="entry">
-                    <span class="time">${timeStr}</span>
-                    <div class="texts">
-                        <div class="original">${escapeHtml(t.original)}</div>
-                        <div class="translated">${escapeHtml(t.translated)}</div>
-                    </div>
-                </div>`;
-        }).join('');
-
-        const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
-  <title>Transcript History</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #0f0f0f; color: #eee; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 24px; }
-    h1 { font-size: 20px; font-weight: 600; margin-bottom: 20px; color: #fff; border-bottom: 1px solid #333; padding-bottom: 12px; }
-    .entry { display: flex; gap: 16px; padding: 12px 0; border-bottom: 1px solid #1e1e1e; align-items: flex-start; }
-    .time { color: #888; font-size: 12px; min-width: 64px; padding-top: 3px; font-variant-numeric: tabular-nums; }
-    .texts { flex: 1; }
-    .original { font-size: 13px; color: rgba(255,255,255,0.55); font-style: italic; margin-bottom: 4px; }
-    .translated { font-size: 15px; color: #fff; font-weight: 500; }
-    .empty { color: #666; text-align: center; margin-top: 40px; }
-  </style>
-</head>
-<body>
-  <h1>📝 Transcript History (${(transcripts as any[]).length} entries)</h1>
-  ${entries || '<p class="empty">No transcripts yet.</p>'}
-</body>
-</html>`;
-
-        historyWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+        historyWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildHistoryWindowHtml())}`);
 
         historyWindow.on('closed', () => {
             historyWindow = null;
+            sendHistoryWindowState(false);
         });
+    });
+
+    ipcMain.on('update-history-window', (_event, transcripts) => {
+        latestHistoryTranscripts = Array.isArray(transcripts) ? transcripts : [];
+        pushHistoryDataToWindow();
     });
 
     // Quit
@@ -603,16 +1033,6 @@ function setupIpcHandlers(): void {
         arch: process.arch,
         isDev,
     }));
-}
-
-/** Escape HTML special characters for safe injection into data: URLs */
-function escapeHtml(str: string): string {
-    return str
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
 }
 
 /**
@@ -636,6 +1056,12 @@ if (!gotTheLock) {
     app.whenReady().then(async () => {
         setupIpcHandlers();
 
+        // ─── Start ZMQ publisher FIRST so commandSock is ready before the
+        //     renderer loads and fires IPC calls (e.g. save-config / setLanguage).
+        //     Previously commandSock was null when those early IPC messages arrived,
+        //     causing "Socket is blocked by a bind or unbind operation" (EBUSY).
+        await startZmqPublisher();
+
         mainWindow = createStealthWindow();
 
         // ─── Production Debugging: Error Listeners ───────────────────────────
@@ -646,10 +1072,25 @@ if (!gotTheLock) {
 
         mainWindow.webContents.on('render-process-gone', (_event: any, details: any) => {
             console.error(`[Main] Renderer process gone. Reason: ${details.reason}, Exit Code: ${details.exitCode}`);
+            // Auto-recovery: reload the window after a brief delay
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                console.log('[Main] Attempting auto-recovery by reloading renderer...');
+                setTimeout(() => {
+                    if (mainWindow && !mainWindow.isDestroyed()) {
+                        mainWindow.reload();
+                    }
+                }, 1000);
+            }
         });
 
         mainWindow.webContents.on('unresponsive', () => {
             console.warn('[Main] Window became unresponsive');
+        });
+
+        // ─── Renderer Console to Main Log ──────────────────────────────────
+        mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
+            const levels = ['DEBUG', 'INFO', 'WARN', 'ERROR'];
+            console.log(`[Renderer ${levels[level] || 'LOG'}] ${message} (${sourceId}:${line})`);
         });
 
         try {
@@ -666,6 +1107,14 @@ if (!gotTheLock) {
 
                 await mainWindow.loadFile(indexHtml);
             }
+
+            // Explicitly show and focus the window
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.show();
+                mainWindow.focus();
+                // Ensure it's on top of other windows
+                mainWindow.setAlwaysOnTop(true, 'screen-saver');
+            }
         } catch (err) {
             console.error('[Main] Failed to load URL/File:', err);
         }
@@ -680,12 +1129,11 @@ if (!gotTheLock) {
             startZmqSubscriber();
         }, 2000);
 
-        startZmqPublisher();
         startInteractionPolling();
 
         // Global shortcut: ⌘+Shift+S (macOS) / Ctrl+Shift+S (Win/Linux) to show control bar
         const shortcut = process.platform === 'darwin' ? 'Command+Shift+S' : 'Ctrl+Shift+S';
-        globalShortcut.register(shortcut, () => {
+        const registered = globalShortcut.register(shortcut, () => {
             if (mainWindow && !mainWindow.isDestroyed()) {
                 mainWindow.webContents.send('show-control-bar');
                 mainWindow.show();
@@ -693,6 +1141,11 @@ if (!gotTheLock) {
                 mainWindow.focus();
             }
         });
+        if (!registered) {
+            console.warn(`[Main] Failed to register global shortcut: ${shortcut}. It may be in use by another app.`);
+        } else {
+            console.log(`[Main] Global shortcut registered: ${shortcut}`);
+        }
     });
 }
 
@@ -722,6 +1175,9 @@ app.on('activate', () => {
 // Cleanup
 app.on('before-quit', () => {
     console.log('[Main] Cleaning up...');
+
+    // Unregister all global shortcuts
+    globalShortcut.unregisterAll();
 
     // CRITICAL: Reset click-through to prevent stuck mouse state
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -759,12 +1215,22 @@ app.on('before-quit', () => {
     }
 
     if (zmqSubscriber) {
-        zmqSubscriber.close();
+        try {
+            zmqSubscriber.close();
+            console.log('[Main] ZMQ subscriber closed');
+        } catch (e) {
+            console.error('[Main] Error closing ZMQ subscriber:', e);
+        }
         zmqSubscriber = null;
     }
 
     if (commandSock) {
-        commandSock.close();
+        try {
+            commandSock.close();
+            console.log('[Main] ZMQ command socket closed');
+        } catch (e) {
+            console.error('[Main] Error closing ZMQ command socket:', e);
+        }
         commandSock = null;
     }
 });

@@ -5,8 +5,28 @@
 ![Version](https://img.shields.io/badge/version-1.0.0-blue?style=for-the-badge)
 ![Platform](https://img.shields.io/badge/platform-macOS%20Silicon-black?style=for-the-badge&logo=apple)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
+![CI](https://img.shields.io/github/actions/workflow/status/senoldogann/live-translate/ci.yml?branch=main&style=for-the-badge&label=CI)
 
 **Stealth Subtitle Translator** is a privacy-first live subtitle overlay for macOS. It uses AI to transcribe audio in real-time and translates it on-device or via cloud APIs — all while remaining **completely invisible to screen sharing tools** (Zoom, Teams, OBS, QuickTime).
+
+---
+
+## Quick Start
+
+```bash
+git clone https://github.com/senoldogann/live-translate.git
+cd live-translate
+npm run oss:start
+```
+
+First launch notes:
+- Install [BlackHole 2ch](https://existential.audio/blackhole/) before starting the app.
+- Open `API Ayarlari` inside the app and paste your Deepgram / DeepL keys there.
+- On first run, the launcher bootstraps `node_modules` and `python/.venv` automatically.
+
+Fast checks after launch:
+- `Bulut` mode + `API Ayarlari` keys saved = Deepgram cloud STT path.
+- Console logs show the active translation provider per subtitle: `deepl`, `google`, `argos`, `fast-argos`, or `passthrough`.
 
 ---
 
@@ -69,24 +89,29 @@ Also recommended: a free [DeepL API key](https://www.deepl.com/pro-api) for high
 git clone https://github.com/senoldogann/live-translate.git
 cd live-translate
 
-# 2. Install Node.js dependencies
-npm install
+# 2. One-command bootstrap for open-source use
+npm run oss:start
+```
 
-# 3. Set up the Python virtual environment and install AI dependencies
+The launcher will:
+- install missing Node.js dependencies
+- create `python/.venv` if needed
+- install Python dependencies from `python/requirements.txt`
+- start the Electron app
+
+If you only want to prepare dependencies without launching the app:
+
+```bash
 npm run python:install
-
-# 4. Configure environment variables (optional but recommended)
-cp .env.example .env
-# Edit .env and add your DEEPL_API_KEY
 ```
 
 ### Run
 
 ```bash
-npm start
+npm run oss:start
 ```
 
-The Electron app will launch and spawn the Python AI engine automatically.
+The Electron app will launch and spawn the Python AI engine automatically. For day-to-day open-source usage, this is the preferred command instead of building a DMG.
 
 ---
 
@@ -119,6 +144,12 @@ npm run lint
 # Build production bundle
 npm run electron:build
 ```
+
+---
+
+## 🔒 Security
+
+Found a vulnerability? Please read [SECURITY.md](SECURITY.md) for responsible disclosure instructions. **Do not open a public issue for security reports.**
 
 ---
 

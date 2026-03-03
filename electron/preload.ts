@@ -13,6 +13,7 @@ interface TranscriptData {
     translated: string;
     timestamp: number;
     isFinal: boolean;
+    translationProvider?: 'deepl' | 'google' | 'argos' | 'fast-argos' | 'passthrough';
 }
 
 interface AppInfo {
@@ -56,6 +57,7 @@ interface ElectronAPI {
     // Engine controls
     restartEngine: () => void;
     toggleStealth: (enabled: boolean) => void;
+    setListening: (enabled: boolean) => void;
     // NEW: Streaming Mode
     setStreamingMode: (enabled: boolean) => void;
     // NEW: Engine Type
@@ -66,6 +68,10 @@ interface ElectronAPI {
     // Kurulum Sihirbazı
     getConfig: () => Promise<any>;
     saveConfig: (config: any) => Promise<boolean>;
+    validateApiKeys: (keys: {
+        deepgramKey?: string;
+        deeplKey?: string;
+    }) => Promise<any>;
     checkBlackhole: () => Promise<boolean>;
     openUrl: (url: string) => void;
 
@@ -73,7 +79,12 @@ interface ElectronAPI {
     getAppInfo: () => Promise<AppInfo>;
 
     openHistoryWindow: (transcripts: unknown[]) => void;
-    onShowControlBar?: (callback: () => void) => () => void;
+    updateHistoryWindow: (transcripts: unknown[]) => void;
+    onHistoryWindowState: (callback: (isOpen: boolean) => void) => () => void;
+    onHistoryData: (callback: (transcripts: unknown[]) => void) => () => void;
+    onShowControlBar: (callback: () => void) => () => void;
+    onEngineReady: (callback: () => void) => () => void;
+    onEngineLog: (callback: (msg: string) => void) => () => void;
 }
 
 // Expose protected methods to renderer
@@ -146,6 +157,10 @@ const electronAPI: ElectronAPI = {
         ipcRenderer.send('toggle-stealth', enabled);
     },
 
+    setListening: (enabled: boolean) => {
+        ipcRenderer.send('set-listening', enabled);
+    },
+
     setStreamingMode: (enabled: boolean) => {
         ipcRenderer.send('set-streaming-mode', enabled);
     },
@@ -162,10 +177,39 @@ const electronAPI: ElectronAPI = {
         ipcRenderer.send('open-history-window', transcripts);
     },
 
+    updateHistoryWindow: (transcripts: unknown[]) => {
+        ipcRenderer.send('update-history-window', transcripts);
+    },
+
+    onHistoryWindowState: (callback: (isOpen: boolean) => void) => {
+        const handler = (_event: IpcRendererEvent, isOpen: boolean) => callback(isOpen);
+        ipcRenderer.on('history-window-state', handler);
+        return () => ipcRenderer.removeListener('history-window-state', handler);
+    },
+
+    onHistoryData: (callback: (transcripts: unknown[]) => void) => {
+        const handler = (_event: IpcRendererEvent, transcripts: unknown[]) => callback(transcripts);
+        ipcRenderer.on('history-data', handler);
+        return () => ipcRenderer.removeListener('history-data', handler);
+    },
+
     onShowControlBar: (callback: () => void) => {
         const handler = () => callback();
         ipcRenderer.on('show-control-bar', handler);
         return () => ipcRenderer.removeListener('show-control-bar', handler);
+    },
+
+    // ═══════════════════════════════════════════════════════════════
+    // Engine Log (Python stderr forwarded safely via IPC)
+    // ═══════════════════════════════════════════════════════════════
+    onEngineLog: (callback: (msg: string) => void) => {
+        const handler = (_event: IpcRendererEvent, msg: string) => {
+            callback(msg);
+        };
+        ipcRenderer.on('engine-log', handler);
+        return () => {
+            ipcRenderer.removeListener('engine-log', handler);
+        };
     },
 
     // ═══════════════════════════════════════════════════════════════
@@ -180,8 +224,15 @@ const electronAPI: ElectronAPI = {
     // ═══════════════════════════════════════════════════════════════
     getConfig: () => ipcRenderer.invoke('get-config'),
     saveConfig: (config: any) => ipcRenderer.invoke('save-config', config),
+    validateApiKeys: (keys: { deepgramKey?: string; deeplKey?: string }) =>
+        ipcRenderer.invoke('validate-api-keys', keys),
     checkBlackhole: () => ipcRenderer.invoke('check-blackhole'),
-    openUrl: (url: string) => ipcRenderer.send('open-url', url)
+    openUrl: (url: string) => ipcRenderer.send('open-url', url),
+    onEngineReady: (callback: () => void) => {
+        const handler = () => callback();
+        ipcRenderer.on('engine-ready', handler);
+        return () => ipcRenderer.removeListener('engine-ready', handler);
+    },
 };
 
 // Expose to window object

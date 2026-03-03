@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import type { SetupConfig } from '../shared/types';
 import './SetupWizard.css';
 
 interface SetupWizardProps {
-    onComplete: (config: any) => void;
+    onComplete: (config: SetupConfig) => void;
 }
 
 type Lang = 'en' | 'tr';
@@ -26,14 +27,6 @@ const TEXTS = {
         bhCheckAgain: "Tekrar Kontrol Et",
         bhDownload: "İndir (Ücretsiz)",
 
-        stepApi: "API Anahtarları (Opsiyonel)",
-        stepApiDesc: "Uygulama yerel (offline) modelle tamamen ücretsiz çalışır. Çok daha hızlı ve profesyonel sonuçlar için API anahtarlarınızı girebilirsiniz.",
-        deepgramTitle: "Deepgram API (Gerçek Zamanlı Bulut)",
-        deepgramHint: "Hesap açarak 200$ ücretsiz kredi alabilirsiniz (yaklaşık 750 saat).",
-        deeplTitle: "DeepL API (Yüksek Kaliteli Çeviri)",
-        deeplHint: "Free tier key sonu ':fx' ile biten anahtar.",
-        getApiKey: "Anahtar Al",
-
         stepFinish: "Kurulum Tamamlandı!",
         stepFinishDesc: "Her şey hazır. Uygulamanın sağ üstündeki tekerlek (⚙️) ikonundan daima ayarlara ulaşabilirsiniz."
     },
@@ -54,14 +47,6 @@ const TEXTS = {
         bhCheckAgain: "Check Again",
         bhDownload: "Download (Free)",
 
-        stepApi: "API Keys (Optional)",
-        stepApiDesc: "The app works 100% offline for free. For ultra-fast & professional results, you can provide API keys.",
-        deepgramTitle: "Deepgram API (Real-time Cloud)",
-        deepgramHint: "Sign up gets you $200 free credits (~750 hours).",
-        deeplTitle: "DeepL API (High Quality Translation)",
-        deeplHint: "Free tier key usually ends with ':fx'.",
-        getApiKey: "Get Key",
-
         stepFinish: "Setup Complete!",
         stepFinishDesc: "Everything is ready. You can always change settings by clicking the gear (⚙️) icon."
     }
@@ -71,10 +56,6 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
     const [step, setStep] = useState(1);
     const [lang, setLang] = useState<Lang>('en');
     const [bhStatus, setBhStatus] = useState<'checking' | 'found' | 'missing'>('missing');
-
-    // Form state
-    const [deepgramKey, setDeepgramKey] = useState("");
-    const [deeplKey, setDeeplKey] = useState("");
 
     const t = TEXTS[lang];
 
@@ -88,9 +69,26 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
     const checkBh = async () => {
         setBhStatus('checking');
         try {
-            const hasBh = await window.electronAPI?.checkBlackhole();
-            setBhStatus(hasBh ? 'found' : 'missing');
+            // Method 1: Ask Browser/Renderer for devices (more reliable & permissions-aware)
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const audioDevices = devices.filter(d => d.kind === 'audioinput' || d.kind === 'audiooutput');
+            const hasBh = audioDevices.some(d =>
+                d.label.toLowerCase().includes('blackhole') ||
+                d.groupId.toLowerCase().includes('blackhole')
+            );
+
+            if (hasBh) {
+                console.log('[SetupSync] BlackHole found via navigator.mediaDevices');
+                setBhStatus('found');
+                return;
+            }
+
+            // Method 2: Fallback to Native Helper
+            const hasBhNative = await window.electronAPI?.checkBlackhole();
+            console.log(`[SetupSync] BlackHole native check result: ${hasBhNative}`);
+            setBhStatus(hasBhNative ? 'found' : 'missing');
         } catch (e) {
+            console.error('[SetupSync] Error checking BlackHole:', e);
             setBhStatus('missing');
         }
     };
@@ -99,11 +97,12 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
     const handleBack = () => setStep(s => s - 1);
 
     const handleFinish = async () => {
-        const config = {
+        const config: SetupConfig = {
             isSetupComplete: true,
             language: lang,
-            deepgramKey,
-            deeplKey
+            engineType: 'local',
+            deepgramKey: "",
+            deeplKey: ""
         };
         // Save to native config
         await window.electronAPI?.saveConfig(config);
@@ -218,57 +217,10 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
                         </motion.div>
                     )}
 
-                    {/* STEP 3: API KEYS */}
+                    {/* STEP 3: FINISH */}
                     {step === 3 && (
                         <motion.div
                             key="step3"
-                            initial={{ opacity: 0, x: 20 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            exit={{ opacity: 0, x: -20 }}
-                            className="wizard-content"
-                        >
-                            <div className="wizard-header">
-                                <h2>{t.stepApi}</h2>
-                                <p>{t.stepApiDesc}</p>
-                            </div>
-
-                            <div className="form-group">
-                                <label>{t.deepgramTitle}</label>
-                                <input
-                                    type="password"
-                                    placeholder="dg_xxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                                    value={deepgramKey}
-                                    onChange={e => setDeepgramKey(e.target.value)}
-                                />
-                                <div className="form-hint">
-                                    {t.deepgramHint} <a href="#" onClick={() => openLink('https://console.deepgram.com/')}>({t.getApiKey})</a>
-                                </div>
-                            </div>
-
-                            <div className="form-group">
-                                <label>{t.deeplTitle}</label>
-                                <input
-                                    type="password"
-                                    placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx"
-                                    value={deeplKey}
-                                    onChange={e => setDeeplKey(e.target.value)}
-                                />
-                                <div className="form-hint">
-                                    {t.deeplHint} <a href="#" onClick={() => openLink('https://www.deepl.com/pro-api')}>({t.getApiKey})</a>
-                                </div>
-                            </div>
-
-                            <div className="wizard-actions">
-                                <button className="wizard-btn secondary" onClick={handleBack} style={{ marginRight: 'auto' }}>{t.back}</button>
-                                <button className="wizard-btn primary" onClick={handleNext}>{t.next}</button>
-                            </div>
-                        </motion.div>
-                    )}
-
-                    {/* STEP 4: FINISH */}
-                    {step === 4 && (
-                        <motion.div
-                            key="step4"
                             initial={{ opacity: 0, x: 20 }}
                             animate={{ opacity: 1, x: 0 }}
                             exit={{ opacity: 0, x: -20 }}

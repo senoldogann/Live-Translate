@@ -12,7 +12,7 @@
     z-index: 9999;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     color: #fff;
-    -webkit-app-region: drag;
+    -webkit-app-region: none;
 }
 
 .wizard-container {

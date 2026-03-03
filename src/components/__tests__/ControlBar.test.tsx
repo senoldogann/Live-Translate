@@ -21,10 +21,13 @@ describe('ControlBar Component', () => {
         onQuit: vi.fn(),
         isStreaming: false,
         onToggleStreaming: vi.fn(),
+        isWordByWord: true,
+        onToggleWordByWord: vi.fn(),
         language: 'en' as const,
         onLanguageChange: vi.fn(),
         engineType: 'local' as const,
-        onEngineTypeChange: vi.fn()
+        onEngineTypeChange: vi.fn(),
+        onShowApiSettings: vi.fn()
     };
 
     it('renders correctly with default props', () => {
@@ -41,6 +44,13 @@ describe('ControlBar Component', () => {
         const btn = screen.getByRole('button', { name: /dinle/i });
         fireEvent.click(btn);
         expect(props.onToggleListening).toHaveBeenCalledTimes(1);
+    });
+
+    it('toggles word-by-word render mode', () => {
+        render(<ControlBar {...props} isWordByWord={false} />);
+        const btn = screen.getByRole('button', { name: /akıcı yazım kapalı/i });
+        fireEvent.click(btn);
+        expect(props.onToggleWordByWord).toHaveBeenCalledTimes(1);
     });
 
     it('changes opacity slider', () => {

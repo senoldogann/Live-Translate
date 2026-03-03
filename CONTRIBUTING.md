@@ -6,12 +6,12 @@ This guide explains how to get involved and what we expect from contributors.
 
 ## 🤝 Code of Conduct
 
-Lütfen tüm etkileşimlerde saygılı ve profesyonel olun. Ayrımcılığa, tacize veya toksik davranışlara toleransımız yoktur.
+Please be respectful and professional in all interactions. We have zero tolerance for discrimination, harassment, or toxic behavior.
 
 ## 🛠️ Development Workflow
 
-1.  **Fork & Clone:** Projeyi kendi hesabınıza fork'layın ve klonlayın.
-2.  **Branching:** Her özellik veya bug fix için yeni bir branch açın.
+1.  **Fork & Clone:** Fork the project to your account and clone it locally.
+2.  **Branching:** Create a new branch for each feature or bug fix.
     *   `feature/amazing-feature`
     *   `fix/critical-bug`
     *   `chore/cleanup`
@@ -21,31 +21,31 @@ Lütfen tüm etkileşimlerde saygılı ve profesyonel olun. Ayrımcılığa, tac
     npm run python:install
     ```
 4.  **Environment:**
-    *   `.env` dosyasını oluşturun ve `DEEPL_API_KEY` ekleyin (Varsa).
+    *   Create a `.env` file and add `DEEPL_API_KEY` (if available).
 5.  **Coding:**
-    *   **TypeScript:** Strict mode aktiftir. `any` kullanmaktan kaçının.
-    *   **React:** Functional component ve Hook kullanın.
-    *   **Style:** Glassmorphism tasarım diline sadık kalın.
+    *   **TypeScript:** Strict mode is active. Avoid using `any`.
+    *   **React:** Use functional components and Hooks.
+    *   **Style:** Adhere to the Glassmorphism design language.
 
 ## ✅ Pull Request (PR) Checklist
 
-Bir PR açmadan önce lütfen aşağıdaki adımları tamamladığınızdan emin olun:
+Before opening a PR, please ensure you have completed the following steps:
 
-- [ ] **Unit Tests:** `npm test` komutu hatasız çalışıyor mu? (Yeni özellik eklediyseniz testini yazdınız mı?)
-- [ ] **Linting:** `npm run lint` komutu hata vermiyor mu?
-- [ ] **Type Check:** TypeScript derleyicisi hata vermiyor mu?
-- [ ] **Documentation:** `README.md` veya `ARCHITECTURE.md` güncellenmesi gerekiyor mu?
-- [ ] **Commit Messages:** Conventional Commits standardına uygun mu? (Örn: `feat: add new streaming mode toggler`)
+- [ ] **Unit Tests:** Does `npm test` run without errors? (Did you write tests for new features?)
+- [ ] **Linting:** Does `npm run lint` pass?
+- [ ] **Type Check:** Does the TypeScript compiler report no errors?
+- [ ] **Documentation:** Does `README.md` or `ARCHITECTURE.md` need updating?
+- [ ] **Commit Messages:** Do they follow the Conventional Commits standard? (e.g., `feat: add new streaming mode toggler`)
 
 ## 🐛 Bug Reporting
 
-Bir hata bulduysanız, lütfen Issues bölümünden yeni bir kayıt açın ve şunları ekleyin:
+If you found a bug, please open a new issue in the Issues section and include:
 
-1.  **Hatanın Tanımı:** Ne oldu?
-2.  **Beklenen Davranış:** Ne olmalıydı?
-3.  **Adımlar:** Hatayı tekrar etmek için ne yapmalıyız?
-4.  **Loglar:** Terminal çıktısı veya ekran görüntüsü.
+1.  **Description:** What happened?
+2.  **Expected Behavior:** What should have happened?
+3.  **Steps to Reproduce:** How can we replicate the bug?
+4.  **Logs:** Terminal output or screenshots.
 
 ---
 
-Katkılarınızla projeyi daha iyi hale getirdiğiniz için teşekkürler! 🚀
+Thank you for making the project better with your contributions! 🚀
