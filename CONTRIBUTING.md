@@ -33,7 +33,7 @@ Before opening a PR, please ensure you have completed the following steps:
 
 - [ ] **Unit Tests:** Does `npm test -- --run` pass? (Did you write tests for new features?)
 - [ ] **Build:** Does `npm run build` pass?
-- [ ] **Verification Suite:** Does `python3 scripts/verify_all.py` pass?
+- [ ] **Verification:** Did you run the available local quality checks for your environment?
 - [ ] **Documentation:** Does `README.md` or `ARCHITECTURE.md` need updating?
 - [ ] **Commit Messages:** Do they follow the Conventional Commits standard? (e.g., `feat: add new streaming mode toggler`)
 

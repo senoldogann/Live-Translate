@@ -57,7 +57,7 @@ Four bugs blocking the application:
 ## Verification
 
 1. `npm test` — Jest unit tests (includes App.test.tsx which mocks `setEngineType`)
-2. `python3 scripts/verify_all.py` — repo quality gate
+2. Internal verification suite — repo quality gate
 3. Runtime smoke check: start app, confirm no preload errors, no EBUSY, Python engine starts
 
 ---
@@ -166,7 +166,7 @@ Four bugs blocking the application:
 
 5. **Verification**
    - Add regression coverage for the new Deepgram buffering behavior.
-   - Re-run unit tests, build, and `scripts/verify_all.py`.
+   - Re-run unit tests, build, and the internal verification suite.
 
 ---
 
@@ -212,7 +212,7 @@ Four bugs blocking the application:
 
 4. **Verification**
    - Add focused renderer tests for the new reveal behavior.
-   - Re-run unit tests, build, and `scripts/verify_all.py`.
+   - Re-run unit tests, build, and the internal verification suite.
 
 ---
 
@@ -233,7 +233,7 @@ Four bugs blocking the application:
 
 3. **Verification**
    - Add a non-destructive smoke check for the launcher script.
-   - Re-run tests, build, and `scripts/verify_all.py`.
+   - Re-run tests, build, and the internal verification suite.
 
 4. **Git Hygiene**
    - Ignore generated release artifacts and interpreter caches that should never be committed in the open-source workflow.
@@ -535,3 +535,24 @@ Four bugs blocking the application:
 
 4. **Verification & Publish**
    - Re-run the verification suite and push the cleaned repo state.
+
+---
+
+## Internal Verification Script Untracking Addendum – 2026-03-04
+
+**Status:** APPROVED  
+**Approved by:** User (remove the internal verification script from the public repository)
+
+### Scope
+
+1. **Untrack Internal Verification Script**
+   - Remove the internal verification script from git while preserving the local file for private maintenance use.
+
+2. **Prevent Re-Addition**
+   - Keep the script excluded from local git indexing without surfacing it in public repo files.
+
+3. **Public Docs Cleanup**
+   - Replace public references to the internal script with generic verification wording so the open-source repo stays truthful.
+
+4. **Verification & Publish**
+   - Run the local internal verification suite, then commit and push the cleaned repo state.
