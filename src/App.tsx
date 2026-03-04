@@ -161,10 +161,6 @@ function App() {
     const primaryOverlaySubtitle =
         activePreviewSubtitle
         ?? (rawLiveSubtitle ? (latestCommittedTranscript ?? rawLiveSubtitle) : (subtitles[0] ?? latestCommittedTranscript ?? null));
-    const committedOverlaySubtitle =
-        activePreviewSubtitle && latestCommittedTranscript && !isSameTranscriptPayload(latestCommittedTranscript, activePreviewSubtitle)
-            ? latestCommittedTranscript
-            : null;
     const overlayOriginal = showOriginal
         ? (activePreviewSubtitle?.original ?? rawLiveSubtitle?.original ?? primaryOverlaySubtitle?.original)
         : undefined;
@@ -600,9 +596,8 @@ function App() {
                                     <AnimatePresence mode="wait">
                                         {primaryOverlaySubtitle && (
                                             <SubtitleOverlay
-                                                key={`${primaryOverlaySubtitle.id}-${committedOverlaySubtitle?.id ?? 'solo'}`}
+                                                key={primaryOverlaySubtitle.id}
                                                 original={overlayOriginal}
-                                                committedTranslated={committedOverlaySubtitle?.translated}
                                                 isFinal={primaryOverlaySubtitle.isFinal}
                                                 wordByWord={isWordByWord}
                                                 translated={primaryOverlaySubtitle.translated}

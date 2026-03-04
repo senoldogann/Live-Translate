@@ -24,6 +24,7 @@ import json
 import signal
 import threading
 import os
+import re
 import warnings
 import requests
 from typing import Optional, Callable
@@ -540,6 +541,7 @@ class TranslationEngine:
         self._installed = False
         self._load_lock = threading.Lock()
         self.last_provider = "passthrough"
+        self._protected_terms = self._build_protected_terms(source_lang)
 
         # Initialize translators
         self.deepl_translator = DeepLTranslator(
@@ -628,6 +630,101 @@ class TranslationEngine:
             name="argos-preload",
         ).start()
 
+    def _build_protected_terms(self, source_lang: str) -> list[str]:
+        shared_terms = [
+            "Amazon Web Services",
+            "AWS",
+            "EC2",
+            "S3",
+            "Lambda",
+            "CloudFormation",
+            "DynamoDB",
+            "Kubernetes",
+            "Docker",
+            "Terraform",
+            "OpenAI",
+            "Deepgram",
+            "DeepL",
+            "BlackHole",
+            "API",
+            "SDK",
+            "CLI",
+            "GPU",
+            "CPU",
+        ]
+
+        if source_lang.lower() == "fi":
+            shared_terms.extend(
+                [
+                    "Azure",
+                    "GitHub",
+                ]
+            )
+
+        seen = set()
+        ordered_terms = []
+        for term in shared_terms:
+            if term.lower() in seen:
+                continue
+            seen.add(term.lower())
+            ordered_terms.append(term)
+
+        return sorted(ordered_terms, key=len, reverse=True)
+
+    def _build_term_pattern(self, term: str):
+        escaped = re.escape(term)
+        if term.replace(" ", "").isalnum():
+            return re.compile(rf"(?<!\w){escaped}(?!\w)", re.IGNORECASE)
+        return re.compile(escaped, re.IGNORECASE)
+
+    def _protect_terms(
+        self,
+        text: str,
+        replacements: Optional[dict[str, str]] = None,
+        next_index: int = 0,
+    ) -> tuple[str, dict[str, str], int]:
+        if not text.strip():
+            return text, replacements or {}, next_index
+
+        protected = text
+        replacement_map = replacements or {}
+
+        for term in self._protected_terms:
+            pattern = self._build_term_pattern(term)
+
+            def replace_match(match):
+                nonlocal next_index
+                placeholder = f"__TERM_{next_index}__"
+                replacement_map[placeholder] = match.group(0)
+                next_index += 1
+                return placeholder
+
+            protected = pattern.sub(replace_match, protected)
+
+        return protected, replacement_map, next_index
+
+    def _protect_payload(
+        self,
+        text: str,
+        context: str,
+    ) -> tuple[str, str, dict[str, str]]:
+        protected_text, replacements, next_index = self._protect_terms(text)
+        protected_context, replacements, _ = self._protect_terms(
+            context,
+            replacements=replacements,
+            next_index=next_index,
+        )
+        return protected_text, protected_context, replacements
+
+    def _restore_terms(self, text: Optional[str], replacements: dict[str, str]) -> Optional[str]:
+        if text is None:
+            return None
+
+        restored = text
+        for placeholder, original in replacements.items():
+            restored = restored.replace(placeholder, original)
+        return restored
+
     def translate(
         self,
         text: str,
@@ -641,11 +738,16 @@ class TranslationEngine:
             return ""
 
         text_stripped = text.strip()
+        protected_text, protected_context, replacements = self._protect_payload(
+            text,
+            context,
+        )
 
         if fast_mode:
             if self.translator:
                 try:
-                    result = self.translator.translate(text)
+                    result = self.translator.translate(protected_text)
+                    result = self._restore_terms(result, replacements)
                     self.last_provider = "fast-argos"
                     return result
                 except Exception as e:
@@ -656,8 +758,8 @@ class TranslationEngine:
         # 1. Try DeepL (Highest Quality) - Skip for Finnish (User request: better quality on Google)
         if self.source_lang.lower() != "fi":
             result = self.deepl_translator.translate(
-                text,
-                context=context,
+                protected_text,
+                context=protected_context,
                 model_type=(
                     "prefer_quality_optimized"
                     if prefer_quality
@@ -665,6 +767,7 @@ class TranslationEngine:
                 ),
             )
             if result:
+                result = self._restore_terms(result, replacements)
                 result_stripped = result.strip()
                 # Check if DeepL actually translated (not just returned same text)
                 if result_stripped.lower() != text_stripped.lower():
@@ -677,8 +780,9 @@ class TranslationEngine:
 
         # 2. Try Google Translate (Fallback)
         try:
-            result = self.google_translator.translate(text)
+            result = self.google_translator.translate(protected_text)
             if result:
+                result = self._restore_terms(result, replacements)
                 print(f"[Google] Translated successfully")
                 self.last_provider = "google"
                 return result
@@ -692,7 +796,8 @@ class TranslationEngine:
 
         if self.translator:
             try:
-                result = self.translator.translate(text)
+                result = self.translator.translate(protected_text)
+                result = self._restore_terms(result, replacements)
                 self.last_provider = "argos"
                 return result
             except Exception as e:
@@ -720,6 +825,7 @@ class TranslationEngine:
         self.google_translator = GoogleTranslator(
             source=new_source_lang, target=self.target_lang
         )
+        self._protected_terms = self._build_protected_terms(new_source_lang)
         self.translator = None
         self._installed = False
 

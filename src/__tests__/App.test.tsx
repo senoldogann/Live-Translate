@@ -4,10 +4,9 @@ import App from '../App';
 
 // Mock dependencies
 vi.mock('../components/SubtitleOverlay', () => ({
-    default: vi.fn(({ original, translated, committedTranslated, isFinal }) => (
+    default: vi.fn(({ original, translated, isFinal }) => (
         <div data-testid="subtitle-overlay">
             <span data-testid="overlay-original">{original}</span>
-            {committedTranslated && <span data-testid="overlay-committed">{committedTranslated}</span>}
             <span data-testid="overlay-translated">{translated}</span>
             <span data-testid="final-status">{isFinal ? 'FINAL' : 'PARTIAL'}</span>
         </div>
@@ -178,7 +177,7 @@ describe('App Component', () => {
         expect(window.electronAPI.toggleStealth).toHaveBeenCalledWith(false);
     });
 
-    it('shows the new preview immediately while keeping the last finalized Turkish line as context', async () => {
+    it('shows the new preview immediately on a single overlay line', async () => {
         render(<App />);
 
         await screen.findByTestId('siri-wave', {}, { timeout: 1000 });
@@ -194,7 +193,6 @@ describe('App Component', () => {
 
         await screen.findByTestId('subtitle-overlay', {}, { timeout: 1000 });
         expect(screen.getByTestId('overlay-translated')).toHaveTextContent('Net cumle');
-        expect(screen.queryByTestId('overlay-committed')).not.toBeInTheDocument();
 
         act(() => {
             mockOnTranscriptUpdate({
@@ -208,7 +206,6 @@ describe('App Component', () => {
         await waitFor(() => {
             expect(screen.getByTestId('overlay-original')).toHaveTextContent('Preview sentence');
             expect(screen.getByTestId('overlay-translated')).toHaveTextContent('Taslak cumle');
-            expect(screen.getByTestId('overlay-committed')).toHaveTextContent('Net cumle');
         }, { timeout: 1000 });
     });
 

@@ -6,7 +6,8 @@ segments into stable Turkish output. This client now:
 
 1. Buffers finalized Deepgram segments instead of treating every frame as a
    full sentence.
-2. Commits a final utterance only on speech-final or UtteranceEnd events.
+2. Commits stable clauses early while still flushing the remaining tail on
+   speech-final or UtteranceEnd events.
 3. Moves translation work off the websocket callback thread.
 4. Drops stale preview translations when fresher segments arrive.
 """
@@ -75,7 +76,32 @@ class DeepgramWSClient:
         # along while the speaker keeps talking.
         self._soft_commit_min_words = 6
         self._soft_commit_min_chars = 42
+        self._rolling_commit_min_words = 12
+        self._rolling_commit_holdback_words = 4
+        self._minimum_trailing_words = 3
+        self._word_gap_commit_threshold_s = 0.32
         self._terminal_punctuation = (".", "!", "?", "…", ":", ";")
+        self._clause_punctuation = (",", "—")
+        self._default_keyterms = (
+            "Amazon Web Services",
+            "AWS",
+            "EC2",
+            "S3",
+            "Lambda",
+            "CloudFormation",
+            "DynamoDB",
+            "Kubernetes",
+            "Docker",
+            "Terraform",
+            "OpenAI",
+            "Deepgram",
+            "DeepL",
+            "API",
+            "SDK",
+            "CLI",
+            "GPU",
+            "CPU",
+        )
 
     # ── Public API ──────────────────────────────────────────────────────────
 
@@ -212,6 +238,17 @@ class DeepgramWSClient:
             if clear_context:
                 self._recent_context.clear()
 
+    def _get_keyterms(self) -> Optional[list[str]]:
+        env_value = os.getenv("DEEPGRAM_KEYTERMS", "").strip()
+        if env_value:
+            terms = [term.strip() for term in env_value.split(",") if term.strip()]
+            return terms or None
+
+        if self.source_lang.lower() not in {"en", "fi"}:
+            return None
+
+        return list(self._default_keyterms)
+
     def _connection_loop(self) -> None:
         """
         Runs inside the daemon thread.
@@ -223,6 +260,7 @@ class DeepgramWSClient:
             return
 
         try:
+            keyterms = self._get_keyterms()
             with self._client.listen.v1.connect(
                 model="nova-3",
                 language=self.source_lang,
@@ -235,6 +273,7 @@ class DeepgramWSClient:
                 utterance_end_ms="1000",
                 vad_events="true",
                 endpointing="500",
+                keyterm=keyterms,
             ) as connection:
                 with self._conn_lock:
                     self._connection = connection
@@ -382,36 +421,132 @@ class DeepgramWSClient:
 
         self._translation_queue.put(job)
 
-    def _should_soft_commit(self, text: str) -> bool:
+    def _replace_buffered_segments(self, text: str) -> None:
+        normalized = text.strip()
+        self._current_segments = [normalized] if normalized else []
+
+    def _split_on_boundary(self, text: str) -> tuple[str, str]:
         normalized = text.strip()
         if not normalized:
-            return False
+            return "", ""
+
+        boundaries = set(self._terminal_punctuation + self._clause_punctuation)
+
+        for index in range(len(normalized) - 1, -1, -1):
+            if normalized[index] not in boundaries:
+                continue
+
+            prefix = normalized[: index + 1].strip()
+            suffix = normalized[index + 1 :].strip()
+
+            if not prefix or not suffix:
+                continue
+
+            if len(prefix.split()) < self._soft_commit_min_words:
+                continue
+
+            if len(suffix.split()) < self._minimum_trailing_words:
+                continue
+
+            return prefix, suffix
+
+        return "", normalized
+
+    def _split_rolling_prefix(self, text: str) -> tuple[str, str]:
+        normalized = text.strip()
+        if not normalized:
+            return "", ""
 
         words = normalized.split()
+        if len(words) < self._rolling_commit_min_words:
+            return "", normalized
+
+        prefix_words = words[: -self._rolling_commit_holdback_words]
+        suffix_words = words[-self._rolling_commit_holdback_words :]
+
+        if len(prefix_words) < self._soft_commit_min_words:
+            return "", normalized
+
+        return " ".join(prefix_words).strip(), " ".join(suffix_words).strip()
+
+    def _split_on_word_gap(self, text: str, words: list[object]) -> tuple[str, str]:
+        normalized = text.strip()
+        if not normalized or len(words) < 2:
+            return "", normalized
+
+        best_prefix_count = -1
+        best_gap = 0.0
+
+        for index in range(len(words) - 1):
+            current_end = getattr(words[index], "end", None)
+            next_start = getattr(words[index + 1], "start", None)
+
+            if not isinstance(current_end, (int, float)):
+                continue
+            if not isinstance(next_start, (int, float)):
+                continue
+
+            gap = float(next_start) - float(current_end)
+            if gap >= self._word_gap_commit_threshold_s and gap > best_gap:
+                best_gap = gap
+                best_prefix_count = index + 1
+
+        if best_prefix_count <= 0:
+            return "", normalized
+
+        tokens = normalized.split()
+        if len(tokens) <= best_prefix_count:
+            return "", normalized
+
+        prefix_tokens = tokens[:best_prefix_count]
+        suffix_tokens = tokens[best_prefix_count:]
+
+        if len(prefix_tokens) < self._soft_commit_min_words:
+            return "", normalized
+
+        if len(suffix_tokens) < self._minimum_trailing_words:
+            return "", normalized
+
+        return " ".join(prefix_tokens).strip(), " ".join(suffix_tokens).strip()
+
+    def _extract_soft_commit(
+        self,
+        text: str,
+        words: Optional[list[object]] = None,
+    ) -> tuple[str, str]:
+        normalized = text.strip()
+        if not normalized:
+            return "", ""
+
         if normalized.endswith(self._terminal_punctuation):
-            return True
+            return normalized, ""
 
-        if len(words) >= self._soft_commit_min_words:
-            return True
+        prefix, suffix = self._split_on_boundary(normalized)
+        if prefix:
+            return prefix, suffix
 
-        if len(normalized) >= self._soft_commit_min_chars:
-            return True
+        if words:
+            prefix, suffix = self._split_on_word_gap(normalized, words)
+            if prefix:
+                return prefix, suffix
 
-        return False
+        return self._split_rolling_prefix(normalized)
 
     def _emit_preview_or_finalize(
         self,
         transcript: str,
         confidence: float,
         speech_final: bool,
+        words: Optional[list[object]] = None,
     ) -> None:
         normalized = transcript.strip()
         if not normalized:
             return
 
-        should_emit_final = False
-        should_emit_preview = False
-        combined = ""
+        final_text = ""
+        preview_text = ""
+        final_context = ""
+        preview_context = ""
 
         with self._segment_lock:
             if not self._current_segments or self._current_segments[-1] != normalized:
@@ -421,38 +556,58 @@ class DeepgramWSClient:
             if not combined:
                 return
 
-            should_emit_final = speech_final or self._should_soft_commit(combined)
-
-            if should_emit_final:
+            if speech_final:
                 if combined == self._last_final_source:
                     self._current_segments.clear()
                     self._last_preview_source = ""
                     return
 
+                final_text = combined
                 self._last_final_source = combined
                 self._current_segments.clear()
                 self._last_preview_source = ""
-            elif self.streaming_mode and combined != self._last_preview_source:
-                self._last_preview_source = combined
-                should_emit_preview = True
             else:
-                return
+                clause_text, remainder = self._extract_soft_commit(
+                    combined,
+                    words=words,
+                )
+                if clause_text:
+                    if clause_text != self._last_final_source:
+                        final_text = clause_text
+                        self._last_final_source = clause_text
 
-        context = self._build_context()
+                    self._replace_buffered_segments(remainder)
+                    self._last_preview_source = ""
 
-        if should_emit_final:
+                    if self.streaming_mode and remainder:
+                        preview_text = remainder
+                        self._last_preview_source = remainder
+                elif self.streaming_mode and combined != self._last_preview_source:
+                    preview_text = combined
+                    self._last_preview_source = combined
+                else:
+                    return
+
+        if final_text:
+            final_context = self._build_context()
             self._enqueue_translation(
-                combined,
+                final_text,
                 confidence=confidence,
                 is_final=True,
-                context=context,
+                context=final_context,
             )
-        elif should_emit_preview:
+
+        if preview_text:
+            preview_context = final_context
+            if final_text:
+                preview_context = " ".join(
+                    part for part in (final_context, final_text) if part
+                )
             self._enqueue_translation(
-                combined,
+                preview_text,
                 confidence=confidence,
                 is_final=False,
-                context=context,
+                context=preview_context,
             )
 
     def _flush_buffered_utterance(self) -> None:
@@ -520,11 +675,13 @@ class DeepgramWSClient:
 
             confidence = getattr(first_alternative, "confidence", 0.0)
             speech_final = bool(getattr(message, "speech_final", False))
+            words = list(getattr(first_alternative, "words", []) or [])
 
             self._emit_preview_or_finalize(
                 transcript=transcript,
                 confidence=confidence,
                 speech_final=speech_final,
+                words=words,
             )
 
         except Exception as e:

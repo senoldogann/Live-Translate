@@ -293,3 +293,67 @@ Four bugs blocking the application:
 
 2. **Regression Coverage**
    - Update renderer tests so the preview path proves the new clause is visible immediately rather than only after a pause.
+
+---
+
+## Clause Commit Addendum – 2026-03-04
+
+**Status:** APPROVED  
+**Approved by:** User (plan the most sensible next upgrade and finish in one session)
+
+### Scope
+
+1. **Clause-Based Early Commit**
+   - Stop treating every long finalized buffer as a single all-or-nothing commit.
+   - Commit punctuation-bounded clauses early when there is enough trailing context left to avoid chopping the sentence too aggressively.
+
+2. **Rolling Tail Holdback**
+   - When no punctuation boundary exists, commit only the stable prefix of a long running utterance and keep a short tail buffered for upcoming context.
+   - Preserve final flush behavior on `speech_final` and `UtteranceEnd`.
+
+3. **Streaming Preview Continuity**
+   - After an early commit, keep the buffered tail eligible for preview updates so subtitles do not visually pause until the next finalized chunk arrives.
+
+4. **Regression Coverage**
+   - Add focused Python tests for clause splitting and rolling tail holdback behavior.
+
+---
+
+## Gap Commit UX Addendum – 2026-03-04
+
+**Status:** APPROVED  
+**Approved by:** User (apply the next best improvements now)
+
+### Scope
+
+1. **Single-Line Overlay**
+   - Remove the separate on-screen `Stabil` translation row from the live overlay so users only read one Turkish line at a time.
+   - Keep the preview/final pipeline intact; simplify presentation only.
+
+2. **Word-Gap Commit Heuristic**
+   - Use finalized word timings from Deepgram results to detect natural pauses between words.
+   - Prefer those pauses over blunt word-count splitting when emitting early finalized clauses.
+
+3. **Regression Coverage**
+   - Update React tests for the single-line overlay behavior.
+   - Add Python coverage for word-gap-based early commit.
+
+---
+
+## Term Stabilization Addendum – 2026-03-04
+
+**Status:** APPROVED  
+**Approved by:** User (apply the most realistic next upgrade in one session)
+
+### Scope
+
+1. **Deepgram Keyterm Prompting**
+   - Inject a curated technical keyterm list into the cloud STT connection.
+   - Allow environment override so open-source users can tune the prompt without code edits.
+
+2. **Local Glossary-Like Protection**
+   - Protect critical technical terms with placeholders before sending text to translation providers.
+   - Restore those exact terms after translation so product names and acronyms stay stable without requiring a paid glossary API.
+
+3. **Regression Coverage**
+   - Add focused Python tests for keyterm selection and protected-term restoration.
