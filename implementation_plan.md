@@ -261,6 +261,31 @@ Four bugs blocking the application:
 
 ---
 
+## Native Popup & Azure Polish Addendum – 2026-03-04
+
+**Status:** APPROVED  
+**Approved by:** User (native popup refactor + "en iyi seviyeye getir")
+
+### Scope
+
+1. **Native Auxiliary Windows**
+   - Replace the in-overlay API settings and usage-guide modals with dedicated native Electron windows, matching the transcript history interaction model.
+   - Keep these windows smaller than transcript history and toggle them on repeated button clicks.
+
+2. **Centralized API Settings Persistence**
+   - Move API credential validation/save orchestration out of the React tree and into the Electron main process.
+   - Broadcast saved settings back to the main window so renderer state stays in sync without duplicated save logic.
+
+3. **Azure Streaming Quality Tuning**
+   - Use Azure Speech SDK stability controls so preview text flickers less while preserving low-latency follow-along behavior.
+   - Add Azure phrase hints for high-value technical terms to improve recognition quality without changing providers.
+
+4. **Refactor & Cleanup**
+   - Remove obsolete in-renderer popup code and align preload/IPC types with the new native-window model.
+   - Update or replace tests so the refactor is covered before completion.
+
+---
+
 ## History De-Dupe Addendum – 2026-03-04
 
 **Status:** APPROVED  
@@ -357,3 +382,51 @@ Four bugs blocking the application:
 
 3. **Regression Coverage**
    - Add focused Python tests for keyterm selection and protected-term restoration.
+
+---
+
+## Azure Cloud Pivot Addendum – 2026-03-04
+
+**Status:** APPROVED  
+**Approved by:** User (implement the chosen cloud integration now)
+
+### Scope
+
+1. **Azure Speech Translation Cloud Path**
+   - Add a dedicated Azure Speech Translation streaming client for cloud mode.
+   - Prefer Azure when valid Speech credentials exist, while keeping the current Deepgram path as fallback.
+
+2. **Credential Flow**
+   - Extend setup config, validation, and the API modal to capture Azure Speech key and region.
+   - Validate Azure credentials before saving and pass them into the Python engine at runtime.
+
+3. **Cloud Backend Selection**
+   - Route cloud audio to Azure first, then Deepgram only when Azure credentials are absent.
+   - Preserve the existing local mode and Deepgram fallback behavior to avoid regressing working installs.
+
+4. **Regression Coverage**
+   - Add focused Python tests for Azure credential handling and cloud backend selection.
+
+---
+
+## Modal UX & Usage Guide Addendum – 2026-03-04
+
+**Status:** APPROVED  
+**Approved by:** User (fix API modal presentation and add Turkish usage scenarios page)
+
+### Scope
+
+1. **API Modal Visual Cleanup**
+   - Remove the dimmed black overlay behind the API settings modal.
+   - Keep the modal interactive while avoiding extra visual noise.
+
+2. **Window Growth Direction Fix**
+   - Stop resizing the main overlay upwards when the modal opens.
+   - Anchor resize behavior to the current top edge so the bar does not jump upward.
+
+3. **In-App Usage Scenarios**
+   - Add a Turkish usage guide panel inside the app UI.
+   - Surface practical recommended modes (canli takip, stabil okuma, dusuk dikkat dagitma) so users can self-serve the best settings.
+
+4. **Regression Coverage**
+   - Extend component tests where the new UI entry point changes visible controls.

@@ -101,6 +101,8 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
             isSetupComplete: true,
             language: lang,
             engineType: 'local',
+            azureSpeechKey: "",
+            azureSpeechRegion: "",
             deepgramKey: "",
             deeplKey: ""
         };

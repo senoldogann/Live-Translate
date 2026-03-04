@@ -15,9 +15,8 @@ import SubtitleOverlay from './components/SubtitleOverlay';
 import ControlBar from './components/ControlBar';
 import SiriWave from './components/SiriWave';
 import SetupWizard from './components/SetupWizard';
-import ApiKeyModal from './components/ApiKeyModal';
 import { useInteractiveZones } from './hooks/useInteractiveZones';
-import type { ApiKeyValidationResult, SetupConfig } from './shared/types';
+import type { ApiSettingsDraft, SetupConfig } from './shared/types';
 import './index.css';
 
 // Types — mirrored from src/shared/types.ts for standalone use
@@ -28,7 +27,7 @@ interface TranscriptData {
     isFinal: boolean;
     confidence?: number;
     source?: 'local' | 'cloud';
-    translationProvider?: 'deepl' | 'google' | 'argos' | 'fast-argos' | 'passthrough';
+    translationProvider?: 'azure-speech' | 'deepl' | 'google' | 'argos' | 'fast-argos' | 'passthrough';
 }
 
 interface SubtitleEntry {
@@ -61,12 +60,6 @@ const MAX_SUBTITLES = 1;
 const SILENCE_TIMEOUT_MS = 3000;
 const PREVIEW_THROTTLE_MS = 120;
 
-interface ApiKeySaveResult {
-    ok: boolean;
-    message: string;
-    validation?: ApiKeyValidationResult;
-}
-
 function App() {
     // ─── State ───────────────────────────────────────────────────────────────
     const [subtitles, setSubtitles] = useState<SubtitleEntry[]>([]);
@@ -86,8 +79,9 @@ function App() {
 
     // Setup Wizard State
     const [isSetupComplete, setIsSetupComplete] = useState<boolean | null>(null);
-    const [isApiModalOpen, setIsApiModalOpen] = useState(false);
     const [isHistoryWindowOpen, setIsHistoryWindowOpen] = useState(false);
+    const [azureSpeechKey, setAzureSpeechKey] = useState("");
+    const [azureSpeechRegion, setAzureSpeechRegion] = useState("");
     const [deepgramKey, setDeepgramKey] = useState("");
     const [deeplKey, setDeeplKey] = useState("");
 
@@ -117,6 +111,8 @@ function App() {
                     if (typeof config.wordByWord === 'boolean') {
                         setIsWordByWord(config.wordByWord);
                     }
+                    if (config.azureSpeechKey) setAzureSpeechKey(config.azureSpeechKey);
+                    if (config.azureSpeechRegion) setAzureSpeechRegion(config.azureSpeechRegion);
                     if (config.deepgramKey) setDeepgramKey(config.deepgramKey);
                     if (config.deeplKey) setDeeplKey(config.deeplKey);
                 } else {
@@ -268,6 +264,24 @@ function App() {
             setIsHistoryWindowOpen(isOpen);
         });
 
+        const unsubscribeApiSettings = window.electronAPI.onApiSettingsUpdated?.((config: SetupConfig) => {
+            if (config.azureSpeechKey !== undefined) {
+                setAzureSpeechKey(config.azureSpeechKey);
+            }
+            if (config.azureSpeechRegion !== undefined) {
+                setAzureSpeechRegion(config.azureSpeechRegion);
+            }
+            if (config.deepgramKey !== undefined) {
+                setDeepgramKey(config.deepgramKey);
+            }
+            if (config.deeplKey !== undefined) {
+                setDeeplKey(config.deeplKey);
+            }
+            if (config.engineType) {
+                setEngineType(config.engineType);
+            }
+        });
+
         return () => {
             unsubscribe();
             unsubscribeAudio();
@@ -275,6 +289,7 @@ function App() {
             unsubscribeShowBar?.();
             unsubscribeEngineLog?.();
             unsubscribeHistoryState?.();
+            unsubscribeApiSettings?.();
             if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
         };
     }, [createTranscriptId, engineType, isListening, language, isStreaming, isStealthMode]);
@@ -343,6 +358,17 @@ function App() {
     }, [rawLiveSubtitle]);
 
     // ─── Handlers ────────────────────────────────────────────────────────────
+    const openApiSettingsWindow = useCallback(() => {
+        const draft: ApiSettingsDraft = {
+            azureSpeechKey,
+            azureSpeechRegion,
+            deepgramKey,
+            deeplKey,
+        };
+
+        window.electronAPI?.openApiSettingsWindow?.(draft);
+    }, [azureSpeechKey, azureSpeechRegion, deepgramKey, deeplKey]);
+
     const handleToggleStealth = useCallback(() => {
         setIsStealthMode((prev) => {
             const next = !prev;
@@ -372,7 +398,6 @@ function App() {
     }, []);
     const handleToggleOriginal = useCallback(() => setShowOriginal(p => !p), []);
     const handleToggleHistory = useCallback(() => {
-        setIsApiModalOpen(false);
         window.electronAPI?.openHistoryWindow(historyWindowEntries);
     }, [historyWindowEntries]);
 
@@ -414,112 +439,30 @@ function App() {
     }, [isWordByWord, persistConfigPatch]);
 
     const handleEngineTypeChange = useCallback((type: 'local' | 'cloud') => {
-        if (type === 'cloud' && !deepgramKey) {
-            setIsApiModalOpen(true);
-            // Don't switch yet, wait for user to provide key
+        const hasAzure = Boolean(azureSpeechKey && azureSpeechRegion);
+        const hasFallback = Boolean(deepgramKey);
+
+        if (type === 'cloud' && !hasAzure && !hasFallback) {
+            openApiSettingsWindow();
             return;
         }
         setEngineType(type);
         window.electronAPI?.setEngineType(type);
         void persistConfigPatch({ engineType: type });
-    }, [deepgramKey, persistConfigPatch]);
-
-    const handleSaveApiKeys = useCallback(async (dg: string, dl: string): Promise<ApiKeySaveResult> => {
-        try {
-            const trimmedDeepgram = dg.trim();
-            const trimmedDeepL = dl.trim();
-
-            const validation = await window.electronAPI?.validateApiKeys({
-                deepgramKey: trimmedDeepgram,
-                deeplKey: trimmedDeepL,
-            });
-
-            if (!validation) {
-                return {
-                    ok: false,
-                    message: 'API anahtarlari dogrulanamadi. Elektron koprusu hazir degil.',
-                };
-            }
-
-            if (!validation.ok) {
-                const problems = [validation.deepgram, validation.deepl]
-                    .filter((item) => !item.ok)
-                    .map((item) => item.message);
-
-                return {
-                    ok: false,
-                    message: problems.join(' '),
-                    validation,
-                };
-            }
-
-            const nextEngineType = trimmedDeepgram && engineType === 'local' ? 'cloud' : engineType;
-            const didSave = await persistConfigPatch({
-                deepgramKey: trimmedDeepgram,
-                deeplKey: trimmedDeepL,
-                engineType: nextEngineType,
-            });
-
-            if (!didSave) {
-                return {
-                    ok: false,
-                    message: 'API anahtarlari dogrulandi ama config diske yazilamadi.',
-                    validation,
-                };
-            }
-
-            setDeepgramKey(trimmedDeepgram);
-            setDeeplKey(trimmedDeepL);
-
-            if (nextEngineType !== engineType) {
-                setEngineType(nextEngineType);
-                window.electronAPI?.setEngineType(nextEngineType);
-            }
-
-            return {
-                ok: true,
-                message: 'API anahtarlari dogrulandi, kaydedildi ve engine tarafina iletildi.',
-                validation,
-            };
-        } catch (error) {
-            return {
-                ok: false,
-                message: `API anahtarlari kaydedilemedi: ${error instanceof Error ? error.message : 'bilinmeyen hata'}`,
-            };
-        }
-    }, [engineType, persistConfigPatch]);
+    }, [azureSpeechKey, azureSpeechRegion, deepgramKey, openApiSettingsWindow, persistConfigPatch]);
 
     // ─── Refs for interactive zones ──────────────────────────────────────────
     const bottomSectionRef = useRef<HTMLDivElement>(null);
     const restoreBtnRef = useRef<HTMLButtonElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
-    // Tracks modal open state inside ResizeObserver callback (avoids stale closure)
-    const isApiModalOpenRef = useRef(isApiModalOpen);
 
     useInteractiveZones({
         showControlBar,
         showHistory: false,
-        fullWindowInteractive: isApiModalOpen,
         bottomSectionRef,
         restoreBtnRef,
         subtitleCount: subtitles.length,
     });
-
-    // Keep the ref in sync so the ResizeObserver callback never reads stale state
-    useEffect(() => {
-        isApiModalOpenRef.current = isApiModalOpen;
-    }, [isApiModalOpen]);
-
-    // ─── API Modal: temporarily expand window so modal renders fully ─────────
-    useEffect(() => {
-        if (isApiModalOpen) {
-            // The modal is centered over the whole overlay, so it needs more headroom.
-            window.electronAPI?.setWindowHeight(720);
-            window.electronAPI?.setIgnoreMouseEvents(false);
-            window.electronAPI?.forceFocus();
-        }
-        // When closed the ResizeObserver naturally recalculates the correct height
-    }, [isApiModalOpen]);
 
     useEffect(() => {
         if (isHistoryWindowOpen) {
@@ -532,8 +475,7 @@ function App() {
         if (!containerRef.current) return;
 
         const handleResize = (entries: ResizeObserverEntry[]) => {
-            // Don't fight the manually-set height while the API modal is open
-            if (!isSetupComplete || isApiModalOpenRef.current) return;
+            if (!isSetupComplete) return;
 
             for (const entry of entries) {
                 // Add a small buffer but keep it tight
@@ -686,20 +628,11 @@ function App() {
                     onLanguageChange={handleLanguageChange}
                     engineType={engineType}
                     onEngineTypeChange={handleEngineTypeChange}
-                    onShowApiSettings={() => {
-                        setIsApiModalOpen(true);
-                    }}
+                    onShowApiSettings={openApiSettingsWindow}
+                    onShowUsageGuide={() => window.electronAPI?.openUsageGuideWindow?.()}
                 />
 
             </motion.div>
-
-            <ApiKeyModal
-                isOpen={isApiModalOpen}
-                onClose={() => setIsApiModalOpen(false)}
-                onSave={handleSaveApiKeys}
-                initialDeepgramKey={deepgramKey}
-                initialDeeplKey={deeplKey}
-            />
         </div>
     );
 }

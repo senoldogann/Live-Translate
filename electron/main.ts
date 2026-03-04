@@ -45,6 +45,8 @@ interface SetupConfig {
     language?: string;
     engineType?: 'local' | 'cloud';
     wordByWord?: boolean;
+    azureSpeechKey?: string;
+    azureSpeechRegion?: string;
     deepgramKey?: string;
     deeplKey?: string;
 }
@@ -56,8 +58,23 @@ interface ApiKeyValidationStatus {
 
 interface ApiKeyValidationResult {
     ok: boolean;
+    azureSpeech: ApiKeyValidationStatus;
     deepgram: ApiKeyValidationStatus;
     deepl: ApiKeyValidationStatus;
+}
+
+interface ApiSettingsDraft {
+    azureSpeechKey: string;
+    azureSpeechRegion: string;
+    deepgramKey: string;
+    deeplKey: string;
+}
+
+interface ApiSettingsSaveResult {
+    ok: boolean;
+    message: string;
+    validation?: ApiKeyValidationResult;
+    config?: SetupConfig;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -66,6 +83,10 @@ interface ApiKeyValidationResult {
 
 const ALLOWED_EXTERNAL_HOSTS = [
     'existential.audio',
+    'azure.microsoft.com',
+    'learn.microsoft.com',
+    'portal.azure.com',
+    'speech.microsoft.com',
     'console.deepgram.com',
     'www.deepl.com',
     'deepl.com',
@@ -95,6 +116,8 @@ const VALID_CONFIG_KEYS = new Set([
     'language',
     'engineType',
     'wordByWord',
+    'azureSpeechKey',
+    'azureSpeechRegion',
     'deepgramKey',
     'deeplKey',
 ]);
@@ -181,6 +204,66 @@ async function validateDeepgramKey(key?: string): Promise<ApiKeyValidationStatus
     }
 }
 
+async function validateAzureSpeechCredentials(
+    key?: string,
+    region?: string,
+): Promise<ApiKeyValidationStatus> {
+    const trimmedKey = key?.trim() ?? '';
+    const trimmedRegion = region?.trim().toLowerCase() ?? '';
+
+    if (!trimmedKey && !trimmedRegion) {
+        return {
+            ok: true,
+            message: 'Azure Speech anahtari bos birakildi.',
+        };
+    }
+
+    if (!trimmedKey || !trimmedRegion) {
+        return {
+            ok: false,
+            message: 'Azure Speech icin hem key hem region gerekli.',
+        };
+    }
+
+    if (!/^[a-z0-9-]+$/.test(trimmedRegion)) {
+        return {
+            ok: false,
+            message: 'Azure Speech region gecersiz gorunuyor.',
+        };
+    }
+
+    try {
+        const response = await fetchWithTimeout(
+            `https://${trimmedRegion}.api.cognitive.microsoft.com/sts/v1.0/issueToken`,
+            {
+                method: 'POST',
+                headers: {
+                    'Ocp-Apim-Subscription-Key': trimmedKey,
+                    'Content-Length': '0',
+                },
+            },
+        );
+
+        if (!response.ok) {
+            const message = await readErrorMessage(
+                response,
+                `Azure Speech dogrulamasi basarisiz (${response.status})`,
+            );
+            return { ok: false, message };
+        }
+
+        return {
+            ok: true,
+            message: 'Azure Speech anahtari dogrulandi.',
+        };
+    } catch (error) {
+        return {
+            ok: false,
+            message: `Azure Speech baglanti hatasi: ${error instanceof Error ? error.message : 'bilinmeyen hata'}`,
+        };
+    }
+}
+
 async function validateDeepLKey(key?: string): Promise<ApiKeyValidationStatus> {
     if (!key?.trim()) {
         return {
@@ -232,7 +315,15 @@ let interactionPollingInterval: NodeJS.Timeout | null = null;
 let isInteractionEnabled = true;
 let hasReceivedZones = false;
 let historyWindow: BrowserWindow | null = null; // Transcript history window
+let apiSettingsWindow: BrowserWindow | null = null;
+let usageGuideWindow: BrowserWindow | null = null;
 let latestHistoryTranscripts: unknown[] = [];
+let latestApiSettingsDraft: ApiSettingsDraft = {
+    azureSpeechKey: '',
+    azureSpeechRegion: '',
+    deepgramKey: '',
+    deeplKey: '',
+};
 let isQuitting = false;
 let pythonRecoveryInFlight = false;
 
@@ -275,9 +366,109 @@ function sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function normalizeSetupConfig(raw: unknown): SetupConfig {
+    if (!isValidConfig(raw)) {
+        return { isSetupComplete: false };
+    }
+
+    const value = raw as Record<string, unknown>;
+    const normalized: SetupConfig = {
+        isSetupComplete: Boolean(value.isSetupComplete ?? value.setupComplete),
+    };
+
+    if (value.language === 'en' || value.language === 'fi' || value.language === 'tr') {
+        normalized.language = value.language;
+    }
+
+    if (value.engineType === 'local' || value.engineType === 'cloud') {
+        normalized.engineType = value.engineType;
+    }
+
+    if (typeof value.wordByWord === 'boolean') {
+        normalized.wordByWord = value.wordByWord;
+    }
+
+    if (typeof value.azureSpeechKey === 'string') {
+        normalized.azureSpeechKey = value.azureSpeechKey;
+    }
+
+    if (typeof value.azureSpeechRegion === 'string') {
+        normalized.azureSpeechRegion = value.azureSpeechRegion;
+    }
+
+    if (typeof value.deepgramKey === 'string') {
+        normalized.deepgramKey = value.deepgramKey;
+    }
+
+    if (typeof value.deeplKey === 'string') {
+        normalized.deeplKey = value.deeplKey;
+    }
+
+    return normalized;
+}
+
+function readSetupConfig(): SetupConfig {
+    try {
+        const data = fs.readFileSync(getSetupConfigPath(), 'utf8');
+        return normalizeSetupConfig(JSON.parse(data));
+    } catch {
+        return { isSetupComplete: false };
+    }
+}
+
+function writeSetupConfig(config: SetupConfig): boolean {
+    if (!isValidConfig(config)) {
+        return false;
+    }
+
+    try {
+        const configPath = getSetupConfigPath();
+        const configDir = path.dirname(configPath);
+        if (!fs.existsSync(configDir)) {
+            fs.mkdirSync(configDir, { recursive: true });
+        }
+
+        fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+        return true;
+    } catch (error) {
+        console.error('[Main] Failed to write setup config:', error);
+        return false;
+    }
+}
+
+function buildApiSettingsDraft(config: SetupConfig): ApiSettingsDraft {
+    return {
+        azureSpeechKey: config.azureSpeechKey ?? '',
+        azureSpeechRegion: (config.azureSpeechRegion ?? '').trim().toLowerCase(),
+        deepgramKey: config.deepgramKey ?? '',
+        deeplKey: config.deeplKey ?? '',
+    };
+}
+
+function sanitizeApiSettingsDraft(raw: unknown): ApiSettingsDraft {
+    const value = (typeof raw === 'object' && raw !== null && !Array.isArray(raw))
+        ? raw as Record<string, unknown>
+        : {};
+
+    return {
+        azureSpeechKey: typeof value.azureSpeechKey === 'string' ? value.azureSpeechKey : '',
+        azureSpeechRegion: typeof value.azureSpeechRegion === 'string'
+            ? value.azureSpeechRegion.trim().toLowerCase()
+            : '',
+        deepgramKey: typeof value.deepgramKey === 'string' ? value.deepgramKey : '',
+        deeplKey: typeof value.deeplKey === 'string' ? value.deeplKey : '',
+    };
+}
+
 function sendHistoryWindowState(isOpen: boolean) {
     if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('history-window-state', isOpen);
+    }
+}
+
+function notifyApiSettingsUpdated(config: SetupConfig) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('api-settings-updated', config);
     }
 }
 
@@ -488,10 +679,550 @@ function buildHistoryWindowHtml() {
 </html>`;
 }
 
+function buildApiSettingsWindowHtml() {
+    return `<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+  <title>API Ayarlari</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    body {
+      background: #09090b;
+      color: #f4f4f5;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      padding: 16px;
+    }
+    .shell {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: linear-gradient(180deg, rgba(20,20,24,0.96), rgba(10,10,14,0.98));
+      overflow: hidden;
+    }
+    .header {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 18px 20px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    h1 { font-size: 21px; font-weight: 700; color: #fff; }
+    .close {
+      width: 36px;
+      height: 36px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.04);
+      color: rgba(255,255,255,0.72);
+      font-size: 24px;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 18px 20px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .desc {
+      color: rgba(255,255,255,0.68);
+      font-size: 14px;
+      line-height: 1.55;
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    label {
+      font-size: 14px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.82);
+    }
+    input {
+      width: 100%;
+      padding: 14px 15px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.05);
+      color: #fff;
+      font-size: 15px;
+      outline: none;
+    }
+    input:focus {
+      border-color: rgba(96,165,250,0.4);
+      box-shadow: 0 0 0 1px rgba(96,165,250,0.18);
+    }
+    .hint {
+      font-size: 13px;
+      color: rgba(255,255,255,0.52);
+      line-height: 1.45;
+    }
+    .hint a {
+      color: #60a5fa;
+      text-decoration: none;
+    }
+    .status {
+      display: none;
+      padding: 12px 14px;
+      border-radius: 14px;
+      font-size: 13px;
+      line-height: 1.45;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.04);
+    }
+    .status.is-success {
+      display: block;
+      color: #d1fae5;
+      border-color: rgba(16,185,129,0.24);
+      background: rgba(16,185,129,0.12);
+    }
+    .status.is-error {
+      display: block;
+      color: #fecaca;
+      border-color: rgba(248,113,113,0.24);
+      background: rgba(248,113,113,0.12);
+    }
+    .footer {
+      flex-shrink: 0;
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      padding: 16px 20px 20px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+    }
+    .btn {
+      min-width: 130px;
+      padding: 12px 16px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.08);
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn.secondary {
+      background: rgba(255,255,255,0.06);
+      color: rgba(255,255,255,0.88);
+    }
+    .btn.primary {
+      background: #60a5fa;
+      color: #fff;
+      border-color: rgba(96,165,250,0.3);
+    }
+    .btn:disabled, .close:disabled {
+      cursor: not-allowed;
+      opacity: 0.6;
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="header">
+      <h1>API Ayarlari</h1>
+      <button id="close" class="close" aria-label="Kapat">&times;</button>
+    </div>
+    <div class="content">
+      <p class="desc">
+        Bulut modu icin Azure Speech ana motor olarak kullanilir. Deepgram yalnizca fallback, DeepL ise
+        ek kalite katmani olarak kalir. Kaydet ve Uygula ile dogrulama anlik yapilir.
+      </p>
+
+      <div class="field">
+        <label for="azureSpeechKey">Azure Speech Key (Onerilen)</label>
+        <input id="azureSpeechKey" type="password" placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
+      </div>
+
+      <div class="field">
+        <label for="azureSpeechRegion">Azure Speech Region</label>
+        <input id="azureSpeechRegion" type="text" placeholder="francecentral" />
+        <div class="hint">
+          <a href="#" data-url="https://portal.azure.com/">Azure Portal</a> veya
+          <a href="#" data-url="https://learn.microsoft.com/en-us/azure/ai-services/speech-service/get-started-speech-translation">Kurulum Rehberi</a>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="deepgramKey">Deepgram API Key (Fallback)</label>
+        <input id="deepgramKey" type="password" placeholder="dg_xxxxxxxxxxxxxxxxxxxxxxxxxxx" />
+        <div class="hint">
+          <a href="#" data-url="https://console.deepgram.com/">Anahtar Al</a>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="deeplKey">DeepL API Key (Ek Kalite / Yerel Fallback)</label>
+        <input id="deeplKey" type="password" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx" />
+        <div class="hint">
+          <a href="#" data-url="https://www.deepl.com/pro-api">Anahtar Al</a>
+        </div>
+      </div>
+
+      <div id="status" class="status"></div>
+    </div>
+    <div class="footer">
+      <button id="cancel" class="btn secondary">Vazgec</button>
+      <button id="save" class="btn primary">Kaydet ve Uygula</button>
+    </div>
+  </div>
+  <script>
+    (() => {
+      const fields = {
+        azureSpeechKey: document.getElementById('azureSpeechKey'),
+        azureSpeechRegion: document.getElementById('azureSpeechRegion'),
+        deepgramKey: document.getElementById('deepgramKey'),
+        deeplKey: document.getElementById('deeplKey'),
+      };
+      const status = document.getElementById('status');
+      const saveButton = document.getElementById('save');
+      const cancelButton = document.getElementById('cancel');
+      const closeButton = document.getElementById('close');
+
+      const setSaving = (saving) => {
+        saveButton.disabled = saving;
+        cancelButton.disabled = saving;
+        closeButton.disabled = saving;
+        saveButton.textContent = saving ? 'Dogrulaniyor...' : 'Kaydet ve Uygula';
+        Object.values(fields).forEach((input) => {
+          input.disabled = saving;
+        });
+      };
+
+      const setStatus = (tone, message) => {
+        status.className = 'status';
+        if (!message) {
+          status.textContent = '';
+          return;
+        }
+
+        status.classList.add(tone === 'success' ? 'is-success' : 'is-error');
+        status.textContent = message;
+      };
+
+      const closeWindow = () => {
+        if (window.electronAPI?.closeCurrentWindow) {
+          window.electronAPI.closeCurrentWindow();
+          return;
+        }
+        window.close();
+      };
+
+      const openUrl = (url) => {
+        if (window.electronAPI?.openUrl) {
+          window.electronAPI.openUrl(url);
+        }
+      };
+
+      closeButton.addEventListener('click', closeWindow);
+      cancelButton.addEventListener('click', closeWindow);
+
+      document.querySelectorAll('[data-url]').forEach((anchor) => {
+        anchor.addEventListener('click', (event) => {
+          event.preventDefault();
+          openUrl(anchor.getAttribute('data-url'));
+        });
+      });
+
+      if (window.electronAPI?.onApiSettingsWindowData) {
+        window.electronAPI.onApiSettingsWindowData((data) => {
+          fields.azureSpeechKey.value = data.azureSpeechKey || '';
+          fields.azureSpeechRegion.value = data.azureSpeechRegion || '';
+          fields.deepgramKey.value = data.deepgramKey || '';
+          fields.deeplKey.value = data.deeplKey || '';
+          setStatus('idle', '');
+          setSaving(false);
+        });
+      }
+
+      saveButton.addEventListener('click', async () => {
+        if (!window.electronAPI?.saveApiSettingsWindow) {
+          setStatus('error', 'Elektron koprusu hazir degil.');
+          return;
+        }
+
+        setSaving(true);
+        setStatus('idle', '');
+
+        try {
+          const result = await window.electronAPI.saveApiSettingsWindow({
+            azureSpeechKey: fields.azureSpeechKey.value,
+            azureSpeechRegion: fields.azureSpeechRegion.value,
+            deepgramKey: fields.deepgramKey.value,
+            deeplKey: fields.deeplKey.value,
+          });
+
+          setStatus(result.ok ? 'success' : 'error', result.message);
+
+          if (result.ok) {
+            window.setTimeout(closeWindow, 320);
+          }
+        } catch (error) {
+          setStatus('error', 'Kayit sirasinda beklenmeyen bir hata olustu.');
+        }
+
+        setSaving(false);
+      });
+    })();
+  </script>
+</body>
+</html>`;
+}
+
+function buildUsageGuideWindowHtml() {
+    return `<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+  <title>Kullanim Senaryolari</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    body {
+      background: #09090b;
+      color: #f4f4f5;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      padding: 16px;
+    }
+    .shell {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: linear-gradient(180deg, rgba(20,20,24,0.96), rgba(10,10,14,0.98));
+      overflow: hidden;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 18px 20px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      flex-shrink: 0;
+    }
+    h1 { font-size: 20px; font-weight: 700; color: #fff; }
+    .close {
+      width: 36px;
+      height: 36px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.04);
+      color: rgba(255,255,255,0.72);
+      font-size: 24px;
+      cursor: pointer;
+    }
+    .content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 18px 20px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .desc, .note {
+      color: rgba(255,255,255,0.68);
+      font-size: 14px;
+      line-height: 1.55;
+    }
+    .card {
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.04);
+      padding: 14px 16px;
+    }
+    .card h2 {
+      font-size: 15px;
+      color: #fff;
+      margin-bottom: 6px;
+    }
+    .card p {
+      font-size: 14px;
+      line-height: 1.55;
+      color: rgba(255,255,255,0.72);
+    }
+    .note {
+      border-radius: 14px;
+      border: 1px solid rgba(96,165,250,0.14);
+      background: rgba(96,165,250,0.08);
+      padding: 14px 16px;
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="header">
+      <h1>Kullanim Senaryolari</h1>
+      <button id="close" class="close" aria-label="Kapat">&times;</button>
+    </div>
+    <div class="content">
+      <p class="desc">
+        Streaming kapali mod daha rahat geliyorsa bu normaldir. Kapali mod daha stabil okunur; acik mod ise
+        konusmaciya yetismek icin daha agresif preview gosterir.
+      </p>
+      <section class="card">
+        <h2>Canli Takip (Onerilen)</h2>
+        <p>Bulut modu acik, Streaming acik ve Akici Yazim acik kullan. Bu ayar konusmaciya en yakin deneyimi verir.</p>
+      </section>
+      <section class="card">
+        <h2>Daha Stabil Okuma</h2>
+        <p>Streaming kapali kullan. Metin biraz daha gec gelir ama daha buyuk ve daha duzgun bloklar halinde okunur.</p>
+      </section>
+      <section class="card">
+        <h2>Dusuk Dikkat Dagitma</h2>
+        <p>Orijinal metni kapat, opakligi 0.88 civarinda ve fontu 22 civarinda tut. Video ustunde en temiz deneyim bu olur.</p>
+      </section>
+      <section class="card">
+        <h2>Teknik Icerik</h2>
+        <p>Azure Speech ana motor olarak kullanilir. Azure aktifse Tüm Transcript penceresi de ayni real-time Azure preview/final akisini gosterir.</p>
+      </section>
+      <div class="note">
+        Bulut + Streaming kapali modu daha rahat buluyorsan bunu kullanmak yanlis degil. Sadece en dusuk algilanan gecikme icin streaming acik gerekir.
+      </div>
+    </div>
+  </div>
+  <script>
+    (() => {
+      const closeWindow = () => {
+        if (window.electronAPI?.closeCurrentWindow) {
+          window.electronAPI.closeCurrentWindow();
+          return;
+        }
+        window.close();
+      };
+
+      document.getElementById('close').addEventListener('click', closeWindow);
+    })();
+  </script>
+</body>
+</html>`;
+}
+
 function pushHistoryDataToWindow() {
     if (historyWindow && !historyWindow.isDestroyed()) {
         historyWindow.webContents.send('history-data', latestHistoryTranscripts);
     }
+}
+
+function pushApiSettingsDataToWindow() {
+    if (apiSettingsWindow && !apiSettingsWindow.isDestroyed()) {
+        apiSettingsWindow.webContents.send('api-settings-window-data', latestApiSettingsDraft);
+    }
+}
+
+function createUtilityWindow(options: {
+    width: number;
+    height: number;
+    minWidth: number;
+    minHeight: number;
+    title: string;
+    backgroundColor?: string;
+}): BrowserWindow {
+    return new BrowserWindow({
+        width: options.width,
+        height: options.height,
+        minWidth: options.minWidth,
+        minHeight: options.minHeight,
+        center: true,
+        title: options.title,
+        backgroundColor: options.backgroundColor ?? '#09090b',
+        autoHideMenuBar: true,
+        webPreferences: {
+            preload: getPreloadPath(),
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: false,
+        },
+    });
+}
+
+async function saveApiSettingsDraft(draft: unknown): Promise<ApiSettingsSaveResult> {
+    const sanitized = sanitizeApiSettingsDraft(draft);
+    const validation = await Promise.all([
+        validateAzureSpeechCredentials(sanitized.azureSpeechKey, sanitized.azureSpeechRegion),
+        validateDeepgramKey(sanitized.deepgramKey),
+        validateDeepLKey(sanitized.deeplKey),
+    ]).then(([azureSpeech, deepgram, deepl]) => ({
+        ok: azureSpeech.ok && deepgram.ok && deepl.ok,
+        azureSpeech,
+        deepgram,
+        deepl,
+    }));
+
+    if (!validation.ok) {
+        const problems = [validation.azureSpeech, validation.deepgram, validation.deepl]
+            .filter((item) => !item.ok)
+            .map((item) => item.message);
+
+        return {
+            ok: false,
+            message: problems.join(' '),
+            validation,
+        };
+    }
+
+    const hasAzure = Boolean(sanitized.azureSpeechKey.trim() && sanitized.azureSpeechRegion.trim());
+    const hasCloudProvider = hasAzure || Boolean(sanitized.deepgramKey.trim());
+    const currentConfig = readSetupConfig();
+    const previousEngineType = currentConfig.engineType ?? 'local';
+    const nextEngineType =
+        !hasCloudProvider && previousEngineType === 'cloud'
+            ? 'local'
+            : hasCloudProvider && previousEngineType === 'local'
+                ? 'cloud'
+                : previousEngineType;
+
+    const nextConfig: SetupConfig = {
+        ...currentConfig,
+        isSetupComplete: currentConfig.isSetupComplete ?? false,
+        azureSpeechKey: sanitized.azureSpeechKey.trim(),
+        azureSpeechRegion: sanitized.azureSpeechRegion.trim().toLowerCase(),
+        deepgramKey: sanitized.deepgramKey.trim(),
+        deeplKey: sanitized.deeplKey.trim(),
+        engineType: nextEngineType,
+    };
+
+    if (!writeSetupConfig(nextConfig)) {
+        return {
+            ok: false,
+            message: 'API ayarlari dogrulandi ama config diske yazilamadi.',
+            validation,
+        };
+    }
+
+    latestApiSettingsDraft = buildApiSettingsDraft(nextConfig);
+
+    await broadcastCommand({
+        type: 'update_keys',
+        azureSpeech: nextConfig.azureSpeechKey,
+        azureSpeechRegion: nextConfig.azureSpeechRegion,
+        deepgram: nextConfig.deepgramKey,
+        deepl: nextConfig.deeplKey,
+    }, 'update_keys');
+
+    if (nextEngineType !== previousEngineType) {
+        await broadcastCommand({
+            type: 'config',
+            key: 'engine_type',
+            value: nextEngineType,
+        }, 'engine_type');
+    }
+
+    notifyApiSettingsUpdated(nextConfig);
+
+    return {
+        ok: true,
+        message: 'API ayarlari dogrulandi, kaydedildi ve engine tarafina iletildi.',
+        validation,
+        config: nextConfig,
+    };
 }
 
 /**
@@ -505,23 +1236,8 @@ function createStealthWindow(): BrowserWindow {
     const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
 
     // If setup is not complete, show a larger window for the wizard
-    let windowHeight = 280;
-    try {
-        const configPath = getSetupConfigPath();
-        if (fs.existsSync(configPath)) {
-            const configRaw = fs.readFileSync(configPath, 'utf-8');
-            const setupConfig = JSON.parse(configRaw);
-            // Check both new and old key for safety here
-            const finished = setupConfig.isSetupComplete || setupConfig.setupComplete;
-            if (!finished) {
-                windowHeight = 600; // Wizard height
-            }
-        } else {
-            windowHeight = 600; // No config, show wizard
-        }
-    } catch {
-        windowHeight = 600; // Default to wizard height if error
-    }
+    const setupConfig = readSetupConfig();
+    const windowHeight = setupConfig.isSetupComplete ? 280 : 600;
 
     const windowWidth = Math.min(1000, Math.floor(screenWidth * 0.75));
     const xPosition = Math.floor((screenWidth - windowWidth) / 2);
@@ -573,14 +1289,11 @@ function startPythonEngine(): ChildProcess | null {
 
     // Setup Config üzerinden API Key okuma
     let env = { ...process.env };
-    try {
-        const configRaw = fs.readFileSync(getSetupConfigPath(), 'utf-8');
-        const setupConfig = JSON.parse(configRaw);
-        if (setupConfig.deepgramKey) env.DEEPGRAM_API_KEY = setupConfig.deepgramKey;
-        if (setupConfig.deeplKey) env.DEEPL_API_KEY = setupConfig.deeplKey;
-    } catch {
-        // İlk çalışmada veya hata durumunda boş kalır
-    }
+    const setupConfig = readSetupConfig();
+    if (setupConfig.azureSpeechKey) env.AZURE_SPEECH_KEY = setupConfig.azureSpeechKey;
+    if (setupConfig.azureSpeechRegion) env.AZURE_SPEECH_REGION = setupConfig.azureSpeechRegion;
+    if (setupConfig.deepgramKey) env.DEEPGRAM_API_KEY = setupConfig.deepgramKey;
+    if (setupConfig.deeplKey) env.DEEPL_API_KEY = setupConfig.deeplKey;
 
     try {
         const proc = spawn(venvPython, [pythonPath], {
@@ -965,7 +1678,7 @@ function setupIpcHandlers(): void {
         }
     });
 
-    // Pencere yüksekliğini ayarla (Dynamic Resizing) - GROW UPWARDS
+    // Pencere yüksekliğini ayarla (Dynamic Resizing) - keep top edge stable
     ipcMain.on('set-window-height', (_event, height: number) => {
         if (mainWindow) {
             try {
@@ -978,16 +1691,9 @@ function setupIpcHandlers(): void {
 
                 if (Math.abs(heightDiff) < 2) return;
 
-                // GROW UPWARDS: Maintain bottom edge position
-                // NewY = currentY - heightDiff (if height grows by 10, target top moves up by 10)
-                const newY = currentY - heightDiff;
-
-                // Bounds protection: prevent window from going above the screen
-                const safeY = Math.max(0, Math.floor(newY));
-
                 mainWindow.setBounds({
                     x: currentX,
-                    y: safeY,
+                    y: currentY,
                     width: currentWidth,
                     height: Math.floor(newHeight)
                 });
@@ -1001,17 +1707,7 @@ function setupIpcHandlers(): void {
     // Setup Wizard IPC Handlers
     // ═══════════════════════════════════════════════════════════════
     ipcMain.handle('get-config', () => {
-        try {
-            const data = fs.readFileSync(getSetupConfigPath(), 'utf8');
-            const parsed = JSON.parse(data);
-            // Normalize legacy key: setupComplete → isSetupComplete
-            if ('setupComplete' in parsed && !('isSetupComplete' in parsed)) {
-                parsed.isSetupComplete = parsed.setupComplete;
-            }
-            return parsed;
-        } catch {
-            return { isSetupComplete: false };
-        }
+        return readSetupConfig();
     });
 
     ipcMain.handle('save-config', async (_event, config) => {
@@ -1020,35 +1716,38 @@ function setupIpcHandlers(): void {
             console.warn('[Main] Invalid config rejected:', JSON.stringify(config));
             return false;
         }
-        try {
-            const configPath = getSetupConfigPath();
-            const configDir = path.dirname(configPath);
-            if (!fs.existsSync(configDir)) {
-                fs.mkdirSync(configDir, { recursive: true });
-            }
-            fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-            console.log('[Main] Config saved successfully to:', configPath);
+        const normalized = normalizeSetupConfig(config);
 
-            // Notify Python engine about key updates via ZMQ
-            await broadcastCommand({
-                type: 'update_keys',
-                deepgram: config.deepgramKey,
-                deepl: config.deeplKey
-            }, 'update_keys');
-
-            return true;
-        } catch (e) {
-            console.error('[Main] Failed to save config:', e);
+        if (!writeSetupConfig(normalized)) {
             return false;
         }
+
+        latestApiSettingsDraft = buildApiSettingsDraft(normalized);
+        console.log('[Main] Config saved successfully to:', getSetupConfigPath());
+
+        await broadcastCommand({
+            type: 'update_keys',
+            azureSpeech: normalized.azureSpeechKey,
+            azureSpeechRegion: normalized.azureSpeechRegion,
+            deepgram: normalized.deepgramKey,
+            deepl: normalized.deeplKey
+        }, 'update_keys');
+
+        notifyApiSettingsUpdated(normalized);
+        return true;
     });
 
     ipcMain.handle('validate-api-keys', async (_event, keys): Promise<ApiKeyValidationResult> => {
+        const azureSpeech = await validateAzureSpeechCredentials(
+            keys?.azureSpeechKey,
+            keys?.azureSpeechRegion,
+        );
         const deepgram = await validateDeepgramKey(keys?.deepgramKey);
         const deepl = await validateDeepLKey(keys?.deeplKey);
 
         return {
-            ok: deepgram.ok && deepl.ok,
+            ok: azureSpeech.ok && deepgram.ok && deepl.ok,
+            azureSpeech,
             deepgram,
             deepl,
         };
@@ -1077,6 +1776,77 @@ function setupIpcHandlers(): void {
         } else {
             console.warn('[Main] Blocked unsafe external URL:', url);
         }
+    });
+
+    ipcMain.on('close-current-window', (event) => {
+        const currentWindow = BrowserWindow.fromWebContents(event.sender);
+        if (currentWindow && currentWindow !== mainWindow) {
+            currentWindow.close();
+        }
+    });
+
+    ipcMain.on('open-api-settings-window', (_event, draft) => {
+        const savedDraft = buildApiSettingsDraft(readSetupConfig());
+        latestApiSettingsDraft =
+            typeof draft === 'object' && draft !== null && !Array.isArray(draft)
+                ? sanitizeApiSettingsDraft(draft)
+                : savedDraft;
+
+        if (apiSettingsWindow && !apiSettingsWindow.isDestroyed()) {
+            apiSettingsWindow.close();
+            return;
+        }
+
+        if (usageGuideWindow && !usageGuideWindow.isDestroyed()) {
+            usageGuideWindow.close();
+        }
+
+        apiSettingsWindow = createUtilityWindow({
+            width: 760,
+            height: 780,
+            minWidth: 680,
+            minHeight: 720,
+            title: 'API Ayarlari',
+        });
+
+        apiSettingsWindow.webContents.on('did-finish-load', () => {
+            pushApiSettingsDataToWindow();
+        });
+
+        apiSettingsWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildApiSettingsWindowHtml())}`);
+
+        apiSettingsWindow.on('closed', () => {
+            apiSettingsWindow = null;
+        });
+    });
+
+    ipcMain.handle('save-api-settings-window', async (_event, draft) => {
+        return saveApiSettingsDraft(draft);
+    });
+
+    ipcMain.on('open-usage-guide-window', () => {
+        if (usageGuideWindow && !usageGuideWindow.isDestroyed()) {
+            usageGuideWindow.close();
+            return;
+        }
+
+        if (apiSettingsWindow && !apiSettingsWindow.isDestroyed()) {
+            apiSettingsWindow.close();
+        }
+
+        usageGuideWindow = createUtilityWindow({
+            width: 720,
+            height: 560,
+            minWidth: 640,
+            minHeight: 500,
+            title: 'Kullanim Senaryolari',
+        });
+
+        usageGuideWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildUsageGuideWindowHtml())}`);
+
+        usageGuideWindow.on('closed', () => {
+            usageGuideWindow = null;
+        });
     });
 
     // ═══════════════════════════════════════════════════════════════

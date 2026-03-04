@@ -908,6 +908,7 @@ class ZmqPublisher:
 # MAIN ENGINE
 # ═══════════════════════════════════════════════════════════════════════════════
 
+from azure_translation_engine import AzureSpeechTranslationClient
 from deepgram_engine import DeepgramWSClient
 
 
@@ -923,6 +924,7 @@ class SubtitleEngine:
         self._last_transcript_time = 0.0
         self._min_transcript_interval = 0.35
         self._deepgram = DeepgramWSClient(None)  # we set publisher below
+        self._azure_speech = AzureSpeechTranslationClient(None)
         self._listening_epoch = 0
 
         # Cümle biriktirme sistemi
@@ -961,6 +963,8 @@ class SubtitleEngine:
         self._deepgram.publisher = self.publisher
         self._deepgram.translator = self.translator
         self._deepgram.streaming_mode = config.streaming_mode
+        self._azure_speech.publisher = self.publisher
+        self._azure_speech.streaming_mode = config.streaming_mode
 
         # Processing thread
         self._process_thread: Optional[threading.Thread] = None
@@ -978,6 +982,55 @@ class SubtitleEngine:
         self._last_audio_level_time = 0.0
         self._audio_level_interval = 1.0 / 30.0  # 30 FPS visualizer
 
+    def _select_cloud_backend_name(self) -> Optional[str]:
+        if self._azure_speech.has_credentials():
+            return "azure"
+        if self._deepgram.has_credentials():
+            return "deepgram"
+        return None
+
+    def _get_active_cloud_client(self):
+        if getattr(self._azure_speech, "_running", False):
+            return self._azure_speech
+        if getattr(self._deepgram, "_running", False):
+            return self._deepgram
+
+        backend = self._select_cloud_backend_name()
+        if backend == "azure":
+            return self._azure_speech
+        if backend == "deepgram":
+            return self._deepgram
+        return None
+
+    def _start_cloud_engine(self):
+        backend = self._select_cloud_backend_name()
+
+        if backend == "azure":
+            self._deepgram.stop()
+            self._azure_speech.start(self.config.source_lang)
+            if (
+                not getattr(self._azure_speech, "_running", False)
+                and self._deepgram.has_credentials()
+            ):
+                print(
+                    "[Cloud] Azure unavailable, falling back to Deepgram for this session."
+                )
+                self._deepgram.start(self.config.source_lang)
+            return
+
+        if backend == "deepgram":
+            self._azure_speech.stop()
+            self._deepgram.start(self.config.source_lang)
+            return
+
+        print(
+            "[Cloud] WARNING: No Azure Speech or Deepgram credentials configured — cloud engine disabled."
+        )
+
+    def _stop_cloud_engine(self):
+        self._azure_speech.stop()
+        self._deepgram.stop()
+
     def _on_audio_chunk(self, audio: np.ndarray):
         """Callback for audio chunks"""
         if not self._running:
@@ -993,9 +1046,11 @@ class SubtitleEngine:
 
         if self.config.engine_type == "cloud":
             # Send directly to Deepgram WebSocket Engine (bypassing local VAD & Whisper)
-            # Audio is float32 normalized, Deepgram expects linear16 PCM
+            # Audio is float32 normalized; both cloud engines accept linear16 PCM.
             audio_int16 = (audio * 32768.0).astype(np.int16).tobytes()
-            self._deepgram.send_audio(audio_int16)
+            cloud_client = self._get_active_cloud_client()
+            if cloud_client is not None:
+                cloud_client.send_audio(audio_int16)
 
             # Still broadcast volume for UI
             rms = np.sqrt(np.mean(audio**2))
@@ -1066,6 +1121,9 @@ class SubtitleEngine:
                             if key == "streaming_mode":
                                 self.config.streaming_mode = bool(value)
                                 self._deepgram.streaming_mode = self.config.streaming_mode
+                                self._azure_speech.streaming_mode = (
+                                    self.config.streaming_mode
+                                )
                             elif key == "is_listening":
                                 enabled = (
                                     value
@@ -1092,28 +1150,39 @@ class SubtitleEngine:
                                 # Restart Deepgram with new language if cloud engine is active
                                 if (
                                     self.config.engine_type == "cloud"
-                                    and self._deepgram._running
+                                    and self._get_active_cloud_client() is not None
                                 ):
-                                    self._deepgram.start(str(value))
+                                    self._start_cloud_engine()
                             elif key == "engine_type":
                                 self.config.engine_type = str(value)
                                 print(f"[Command] Engine Type set to: {value}")
                                 if value == "cloud":
-                                    self._deepgram.start(self.config.source_lang)
+                                    self._start_cloud_engine()
                                 else:
-                                    self._deepgram.stop()
+                                    self._stop_cloud_engine()
                         elif data.get("type") == "update_keys":
                             # Fired by Electron save-config; must be a top-level branch
                             dg_key = data.get("deepgram")
                             dl_key = data.get("deepl")
+                            azure_key = data.get("azureSpeech")
+                            azure_region = data.get("azureSpeechRegion")
                             print("[Command] Updating API keys...")
-                            if dg_key:
-                                self._deepgram.update_api_key(dg_key)
+                            if dg_key is not None:
+                                self._deepgram.update_api_key(str(dg_key))
+                            if azure_key is not None or azure_region is not None:
+                                self._azure_speech.update_credentials(
+                                    None if azure_key is None else str(azure_key),
+                                    None
+                                    if azure_region is None
+                                    else str(azure_region),
+                                )
                             if dl_key:
                                 if hasattr(self.translator, "deepl_translator"):
                                     self.translator.deepl_translator.update_api_key(
                                         dl_key
                                     )
+                            if self.config.engine_type == "cloud":
+                                self._start_cloud_engine()
                         elif data.get("type") == "shutdown":
                             print("[Command] Shutdown requested by Electron")
                             self.stop()
@@ -1311,7 +1380,7 @@ class SubtitleEngine:
 
         # Start deepgram initially if configured
         if self.config.engine_type == "cloud":
-            self._deepgram.start(self.config.source_lang)
+            self._start_cloud_engine()
 
         # Start processing thread
         self._process_thread = threading.Thread(target=self._process_loop, daemon=True)
@@ -1338,7 +1407,7 @@ class SubtitleEngine:
         # Stop components
         self.audio_capture.stop()
         self.publisher.stop()
-        self._deepgram.stop()
+        self._stop_cloud_engine()
 
         current_thread = threading.current_thread()
 

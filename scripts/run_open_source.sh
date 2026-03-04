@@ -7,6 +7,7 @@ PYTHON_DIR="$ROOT_DIR/python"
 VENV_DIR="$PYTHON_DIR/.venv"
 VENV_PYTHON="$VENV_DIR/bin/python"
 REQUIREMENTS_FILE="$PYTHON_DIR/requirements.txt"
+REQUIREMENTS_STAMP="$VENV_DIR/.requirements.synced"
 
 print_usage() {
     cat <<'EOF'
@@ -45,19 +46,22 @@ ensure_node_dependencies() {
 }
 
 ensure_python_environment() {
-    if [ -x "$VENV_PYTHON" ]; then
-        return
+    if [ ! -x "$VENV_PYTHON" ]; then
+        local python_bin
+        python_bin="$(find_python)"
+
+        echo "[run_open_source] Creating Python virtual environment with $python_bin..."
+        (cd "$ROOT_DIR" && "$python_bin" -m venv "$VENV_DIR")
+
+        echo "[run_open_source] Upgrading pip..."
+        (cd "$ROOT_DIR" && "$VENV_PYTHON" -m pip install --upgrade pip)
     fi
 
-    local python_bin
-    python_bin="$(find_python)"
-
-    echo "[run_open_source] Creating Python virtual environment with $python_bin..."
-    (cd "$ROOT_DIR" && "$python_bin" -m venv "$VENV_DIR")
-
-    echo "[run_open_source] Installing Python dependencies..."
-    (cd "$ROOT_DIR" && "$VENV_PYTHON" -m pip install --upgrade pip)
-    (cd "$ROOT_DIR" && "$VENV_PYTHON" -m pip install -r "$REQUIREMENTS_FILE")
+    if [ ! -f "$REQUIREMENTS_STAMP" ] || [ "$REQUIREMENTS_FILE" -nt "$REQUIREMENTS_STAMP" ]; then
+        echo "[run_open_source] Syncing Python dependencies..."
+        (cd "$ROOT_DIR" && "$VENV_PYTHON" -m pip install -r "$REQUIREMENTS_FILE")
+        touch "$REQUIREMENTS_STAMP"
+    fi
 }
 
 main() {

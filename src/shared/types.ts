@@ -16,7 +16,7 @@ export interface TranscriptMessage {
     isFinal: boolean;
     confidence?: number;
     source?: 'local' | 'cloud';
-    translationProvider?: 'deepl' | 'google' | 'argos' | 'fast-argos' | 'passthrough';
+    translationProvider?: 'azure-speech' | 'deepl' | 'google' | 'argos' | 'fast-argos' | 'passthrough';
     type?: 'transcript';
 }
 
@@ -52,8 +52,23 @@ export interface ApiKeyValidationStatus {
 
 export interface ApiKeyValidationResult {
     ok: boolean;
+    azureSpeech: ApiKeyValidationStatus;
     deepgram: ApiKeyValidationStatus;
     deepl: ApiKeyValidationStatus;
+}
+
+export interface ApiSettingsDraft {
+    azureSpeechKey: string;
+    azureSpeechRegion: string;
+    deepgramKey: string;
+    deeplKey: string;
+}
+
+export interface ApiSettingsSaveResult {
+    ok: boolean;
+    message: string;
+    validation?: ApiKeyValidationResult;
+    config?: SetupConfig;
 }
 
 export interface SetupConfig {
@@ -62,6 +77,8 @@ export interface SetupConfig {
     language?: 'en' | 'fi' | 'tr';
     engineType?: 'local' | 'cloud';
     wordByWord?: boolean;
+    azureSpeechKey?: string;
+    azureSpeechRegion?: string;
     deepgramKey?: string;
     deeplKey?: string;
 }
@@ -121,6 +138,8 @@ export interface ElectronAPI {
     getConfig: () => Promise<SetupConfig>;
     saveConfig: (config: SetupConfig) => Promise<boolean>;
     validateApiKeys: (keys: {
+        azureSpeechKey?: string;
+        azureSpeechRegion?: string;
         deepgramKey?: string;
         deeplKey?: string;
     }) => Promise<ApiKeyValidationResult>;
@@ -135,6 +154,14 @@ export interface ElectronAPI {
     updateHistoryWindow?: (transcripts: unknown[]) => void;
     onHistoryWindowState?: (callback: (isOpen: boolean) => void) => () => void;
     onHistoryData?: (callback: (transcripts: unknown[]) => void) => () => void;
+
+    // Native auxiliary windows
+    openApiSettingsWindow?: (draft: ApiSettingsDraft) => void;
+    saveApiSettingsWindow?: (draft: ApiSettingsDraft) => Promise<ApiSettingsSaveResult>;
+    onApiSettingsWindowData?: (callback: (draft: ApiSettingsDraft) => void) => () => void;
+    onApiSettingsUpdated?: (callback: (config: SetupConfig) => void) => () => void;
+    openUsageGuideWindow?: () => void;
+    closeCurrentWindow?: () => void;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

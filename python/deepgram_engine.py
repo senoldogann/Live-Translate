@@ -160,6 +160,9 @@ class DeepgramWSClient:
         )
         self._keepalive_thread.start()
 
+    def has_credentials(self) -> bool:
+        return bool(self.api_key.strip())
+
     def send_audio(self, audio_bytes: bytes) -> None:
         """Send raw PCM-16 LE bytes to the open WebSocket connection."""
         with self._conn_lock:
@@ -220,13 +223,15 @@ class DeepgramWSClient:
 
     def update_api_key(self, new_key: str) -> None:
         """Swap in a new Deepgram API key; restart if currently streaming."""
-        if not new_key or new_key == self.api_key:
+        normalized = new_key.strip()
+        if normalized == self.api_key:
             return
         print("[Deepgram] Updating API key...")
-        self.api_key = new_key
+        self.api_key = normalized
         if self._running:
             self.stop()
-            self.start(self.source_lang)
+            if self.has_credentials():
+                self.start(self.source_lang)
 
     # ── Internal ────────────────────────────────────────────────────────────
 

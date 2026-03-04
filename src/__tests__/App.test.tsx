@@ -23,9 +23,13 @@ vi.mock('../components/ControlBar', () => ({
     default: ({
         onToggleListening,
         onShowHistory,
+        onShowApiSettings,
+        onShowUsageGuide,
     }: {
         onToggleListening: () => void;
         onShowHistory: () => void;
+        onShowApiSettings: () => void;
+        onShowUsageGuide: () => void;
     }) => (
         <div>
             <button data-testid="toggle-listening" onClick={onToggleListening}>
@@ -33,6 +37,12 @@ vi.mock('../components/ControlBar', () => ({
             </button>
             <button data-testid="toggle-history" onClick={onShowHistory}>
                 Toggle History
+            </button>
+            <button data-testid="open-settings" onClick={onShowApiSettings}>
+                Open Settings
+            </button>
+            <button data-testid="open-usage-guide" onClick={onShowUsageGuide}>
+                Open Usage Guide
             </button>
             <div data-testid="control-bar" />
         </div>
@@ -53,11 +63,13 @@ describe('App Component', () => {
     let mockOnTranscriptUpdate: (data: any) => void;
     let mockOnEngineReady: () => void;
     let mockOnHistoryWindowState: ((isOpen: boolean) => void) | undefined;
+    let mockOnApiSettingsUpdated: ((config: any) => void) | undefined;
 
     beforeEach(() => {
         mockOnTranscriptUpdate = vi.fn();
         mockOnEngineReady = vi.fn();
         mockOnHistoryWindowState = undefined;
+        mockOnApiSettingsUpdated = undefined;
 
         // Mock window.electronAPI
         window.electronAPI = {
@@ -84,10 +96,15 @@ describe('App Component', () => {
             setEngineType: vi.fn(),
             openHistoryWindow: vi.fn(),
             updateHistoryWindow: vi.fn(),
+            openApiSettingsWindow: vi.fn(),
+            saveApiSettingsWindow: vi.fn(),
+            openUsageGuideWindow: vi.fn(),
+            closeCurrentWindow: vi.fn(),
             getConfig: vi.fn().mockResolvedValue({ isSetupComplete: true }),
             saveConfig: vi.fn().mockResolvedValue(true),
             validateApiKeys: vi.fn().mockResolvedValue({
                 ok: true,
+                azureSpeech: { ok: true, message: 'ok' },
                 deepgram: { ok: true, message: 'ok' },
                 deepl: { ok: true, message: 'ok' },
             }),
@@ -101,6 +118,10 @@ describe('App Component', () => {
             onEngineLog: vi.fn().mockReturnValue(vi.fn()),
             onHistoryWindowState: vi.fn((cb) => {
                 mockOnHistoryWindowState = cb;
+                return vi.fn();
+            }),
+            onApiSettingsUpdated: vi.fn((cb) => {
+                mockOnApiSettingsUpdated = cb;
                 return vi.fn();
             }),
         };
@@ -318,5 +339,46 @@ describe('App Component', () => {
                 isFinal: true,
             }),
         ]);
+    });
+
+    it('opens native utility windows and keeps API settings state in sync', async () => {
+        render(<App />);
+
+        await screen.findByTestId('siri-wave', {}, { timeout: 1000 });
+
+        act(() => {
+            screen.getByTestId('open-settings').click();
+        });
+
+        expect(window.electronAPI.openApiSettingsWindow).toHaveBeenCalledWith({
+            azureSpeechKey: '',
+            azureSpeechRegion: '',
+            deepgramKey: '',
+            deeplKey: '',
+        });
+
+        act(() => {
+            mockOnApiSettingsUpdated?.({
+                isSetupComplete: true,
+                engineType: 'cloud',
+                azureSpeechKey: 'azure-key',
+                azureSpeechRegion: 'francecentral',
+                deepgramKey: 'dg-key',
+                deeplKey: 'deepl-key',
+            });
+        });
+
+        act(() => {
+            screen.getByTestId('open-settings').click();
+            screen.getByTestId('open-usage-guide').click();
+        });
+
+        expect(window.electronAPI.openApiSettingsWindow).toHaveBeenLastCalledWith({
+            azureSpeechKey: 'azure-key',
+            azureSpeechRegion: 'francecentral',
+            deepgramKey: 'dg-key',
+            deeplKey: 'deepl-key',
+        });
+        expect(window.electronAPI.openUsageGuideWindow).toHaveBeenCalledTimes(1);
     });
 });

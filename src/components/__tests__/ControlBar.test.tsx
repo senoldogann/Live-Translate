@@ -27,7 +27,8 @@ describe('ControlBar Component', () => {
         onLanguageChange: vi.fn(),
         engineType: 'local' as const,
         onEngineTypeChange: vi.fn(),
-        onShowApiSettings: vi.fn()
+        onShowApiSettings: vi.fn(),
+        onShowUsageGuide: vi.fn(),
     };
 
     it('renders correctly with default props', () => {
@@ -69,5 +70,19 @@ describe('ControlBar Component', () => {
         const quitBtn = screen.getByRole('button', { name: /kapat/i });
         fireEvent.click(quitBtn);
         expect(props.onQuit).toHaveBeenCalledTimes(1);
+    });
+
+    it('opens usage guide', () => {
+        render(<ControlBar {...props} />);
+        const guideBtn = screen.getByRole('button', { name: /kullanim senaryolari/i });
+        fireEvent.click(guideBtn);
+        expect(props.onShowUsageGuide).toHaveBeenCalledTimes(1);
+    });
+
+    it('opens native API settings window', () => {
+        render(<ControlBar {...props} />);
+        const settingsBtn = screen.getByRole('button', { name: /api ayarları/i });
+        fireEvent.click(settingsBtn);
+        expect(props.onShowApiSettings).toHaveBeenCalledTimes(1);
     });
 });

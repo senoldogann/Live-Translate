@@ -115,6 +115,34 @@ const electronAPI = {
         return () => ipcRenderer.removeListener('history-data', handler);
     },
 
+    openApiSettingsWindow: (draft) => {
+        ipcRenderer.send('open-api-settings-window', draft);
+    },
+
+    saveApiSettingsWindow: (draft) => {
+        return ipcRenderer.invoke('save-api-settings-window', draft);
+    },
+
+    onApiSettingsWindowData: (callback) => {
+        const handler = (_event, draft) => callback(draft);
+        ipcRenderer.on('api-settings-window-data', handler);
+        return () => ipcRenderer.removeListener('api-settings-window-data', handler);
+    },
+
+    onApiSettingsUpdated: (callback) => {
+        const handler = (_event, config) => callback(config);
+        ipcRenderer.on('api-settings-updated', handler);
+        return () => ipcRenderer.removeListener('api-settings-updated', handler);
+    },
+
+    openUsageGuideWindow: () => {
+        ipcRenderer.send('open-usage-guide-window');
+    },
+
+    closeCurrentWindow: () => {
+        ipcRenderer.send('close-current-window');
+    },
+
     // ═══════════════════════════════════════════════════════════════
     // Engine Type
     // ═══════════════════════════════════════════════════════════════

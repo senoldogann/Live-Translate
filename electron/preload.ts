@@ -13,7 +13,21 @@ interface TranscriptData {
     translated: string;
     timestamp: number;
     isFinal: boolean;
-    translationProvider?: 'deepl' | 'google' | 'argos' | 'fast-argos' | 'passthrough';
+    translationProvider?: 'azure-speech' | 'deepl' | 'google' | 'argos' | 'fast-argos' | 'passthrough';
+}
+
+interface ApiSettingsDraft {
+    azureSpeechKey: string;
+    azureSpeechRegion: string;
+    deepgramKey: string;
+    deeplKey: string;
+}
+
+interface ApiSettingsSaveResult {
+    ok: boolean;
+    message: string;
+    validation?: unknown;
+    config?: unknown;
 }
 
 interface AppInfo {
@@ -69,6 +83,8 @@ interface ElectronAPI {
     getConfig: () => Promise<any>;
     saveConfig: (config: any) => Promise<boolean>;
     validateApiKeys: (keys: {
+        azureSpeechKey?: string;
+        azureSpeechRegion?: string;
         deepgramKey?: string;
         deeplKey?: string;
     }) => Promise<any>;
@@ -82,6 +98,12 @@ interface ElectronAPI {
     updateHistoryWindow: (transcripts: unknown[]) => void;
     onHistoryWindowState: (callback: (isOpen: boolean) => void) => () => void;
     onHistoryData: (callback: (transcripts: unknown[]) => void) => () => void;
+    openApiSettingsWindow: (draft: ApiSettingsDraft) => void;
+    saveApiSettingsWindow: (draft: ApiSettingsDraft) => Promise<ApiSettingsSaveResult>;
+    onApiSettingsWindowData: (callback: (draft: ApiSettingsDraft) => void) => () => void;
+    onApiSettingsUpdated: (callback: (config: any) => void) => () => void;
+    openUsageGuideWindow: () => void;
+    closeCurrentWindow: () => void;
     onShowControlBar: (callback: () => void) => () => void;
     onEngineReady: (callback: () => void) => () => void;
     onEngineLog: (callback: (msg: string) => void) => () => void;
@@ -193,6 +215,34 @@ const electronAPI: ElectronAPI = {
         return () => ipcRenderer.removeListener('history-data', handler);
     },
 
+    openApiSettingsWindow: (draft: ApiSettingsDraft) => {
+        ipcRenderer.send('open-api-settings-window', draft);
+    },
+
+    saveApiSettingsWindow: (draft: ApiSettingsDraft) => {
+        return ipcRenderer.invoke('save-api-settings-window', draft);
+    },
+
+    onApiSettingsWindowData: (callback: (draft: ApiSettingsDraft) => void) => {
+        const handler = (_event: IpcRendererEvent, draft: ApiSettingsDraft) => callback(draft);
+        ipcRenderer.on('api-settings-window-data', handler);
+        return () => ipcRenderer.removeListener('api-settings-window-data', handler);
+    },
+
+    onApiSettingsUpdated: (callback: (config: any) => void) => {
+        const handler = (_event: IpcRendererEvent, config: any) => callback(config);
+        ipcRenderer.on('api-settings-updated', handler);
+        return () => ipcRenderer.removeListener('api-settings-updated', handler);
+    },
+
+    openUsageGuideWindow: () => {
+        ipcRenderer.send('open-usage-guide-window');
+    },
+
+    closeCurrentWindow: () => {
+        ipcRenderer.send('close-current-window');
+    },
+
     onShowControlBar: (callback: () => void) => {
         const handler = () => callback();
         ipcRenderer.on('show-control-bar', handler);
@@ -224,7 +274,12 @@ const electronAPI: ElectronAPI = {
     // ═══════════════════════════════════════════════════════════════
     getConfig: () => ipcRenderer.invoke('get-config'),
     saveConfig: (config: any) => ipcRenderer.invoke('save-config', config),
-    validateApiKeys: (keys: { deepgramKey?: string; deeplKey?: string }) =>
+    validateApiKeys: (keys: {
+        azureSpeechKey?: string;
+        azureSpeechRegion?: string;
+        deepgramKey?: string;
+        deeplKey?: string;
+    }) =>
         ipcRenderer.invoke('validate-api-keys', keys),
     checkBlackhole: () => ipcRenderer.invoke('check-blackhole'),
     openUrl: (url: string) => ipcRenderer.send('open-url', url),
