@@ -13,7 +13,7 @@ If you discover a security vulnerability in Stealth Subtitle Translator, please 
 ### How to Report
 
 1. **Do NOT open a public GitHub Issue** for security vulnerabilities.
-2. Send an email to **security@senoldogan.com** (or open a [private security advisory](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability) on GitHub).
+2. Send an email to **contact@senoldogan.dev** (or open a [private security advisory](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability) on GitHub).
 3. Include:
    - A clear description of the vulnerability
    - Steps to reproduce

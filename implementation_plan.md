@@ -513,3 +513,25 @@ Four bugs blocking the application:
 
 4. **Regression Coverage**
    - Add component coverage for the stealth tooltip-disabled state.
+
+---
+
+## Private Rules Untracking Addendum – 2026-03-04
+
+**Status:** APPROVED  
+**Approved by:** User (remove internal agent/provider rule files from GitHub and fix contact email)
+
+### Scope
+
+1. **Untrack Internal AI Rule Assets**
+   - Remove internal provider and agent rule/config trees from git while preserving them locally.
+   - Ensure future commits do not reintroduce them.
+
+2. **Ignore Future Re-Adds**
+   - Extend `.gitignore` to exclude local-only agent/provider instruction files and directories.
+
+3. **Security Contact Correction**
+   - Replace the public security reporting email with the user-provided address.
+
+4. **Verification & Publish**
+   - Re-run the verification suite and push the cleaned repo state.
