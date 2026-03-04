@@ -2,7 +2,7 @@
     "name": "stealth-subtitle-translator",
     "version": "1.0.0",
     "description": "Real-time, privacy-focused desktop subtitle translation with stealth overlay",
-    "author": "Senol Dogan <https://github.com/senoldogann>",
+    "author": "Senol Dogan",
     "license": "MIT",
     "repository": {
         "type": "git",
@@ -23,7 +23,6 @@
         "python:install": "bash scripts/run_open_source.sh --setup-only",
         "python:engine": "source python/.venv/bin/activate && python python/engine.py",
         "start": "npm run electron:dev",
-        "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
         "test": "vitest",
         "preview": "vite preview"
     },

@@ -470,3 +470,24 @@ Four bugs blocking the application:
 
 3. **Regression Coverage**
    - Add React coverage that verifies the current stealth state is synced to Electron on initial mount.
+
+---
+
+## Repo Cleanup & Docs Alignment Addendum – 2026-03-04
+
+**Status:** APPROVED  
+**Approved by:** User (clean unnecessary files, verify docs, and republish)
+
+### Scope
+
+1. **Repository Hygiene**
+   - Remove dead tracked debug files that no longer reflect the product path.
+   - Clear disposable local build artifacts from the workspace so the directory stays clean for open-source users.
+
+2. **Documentation Truthfulness**
+   - Update README, CONTRIBUTING, and architecture docs so they describe the current Azure-first cloud flow, current local defaults, and the real verification commands.
+   - Remove references to unsupported or unconfigured workflow steps that would mislead contributors.
+
+3. **Release Verification**
+   - Re-run the project verification suite after cleanup.
+   - Push the cleaned state to GitHub only after the repo is still healthy.

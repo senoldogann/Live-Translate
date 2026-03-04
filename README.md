@@ -7,7 +7,7 @@
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
 ![CI](https://img.shields.io/github/actions/workflow/status/senoldogann/live-translate/ci.yml?branch=main&style=for-the-badge&label=CI)
 
-**Stealth Subtitle Translator** is a privacy-first live subtitle overlay for macOS. It uses AI to transcribe audio in real-time and translates it on-device or via cloud APIs — all while remaining **completely invisible to screen sharing tools** (Zoom, Teams, OBS, QuickTime).
+**Stealth Subtitle Translator** is a privacy-first live subtitle overlay for macOS. It uses AI to transcribe audio in real-time and translates it on-device or via cloud APIs — all while remaining **invisible to screen sharing tools when Stealth mode is enabled** (Zoom, Teams, OBS, QuickTime).
 
 Created and maintained by **Senol Dogan**.
 
@@ -36,15 +36,15 @@ Fast checks after launch:
 ## ✨ Features
 
 ### 🛡️ Ghost-Level Invisibility
-Uses macOS's native `NSWindowSharingNone` API to make the overlay window invisible to any screen capture engine.
+Uses macOS's native content-protection hook to make the overlay window invisible to screen capture engines while Stealth mode is enabled.
 
 - **Meeting privacy:** Follow live translations during a presentation — attendees only see your screen.
 - **Streamers:** Read chat or notes while streaming; your audience sees a clean desktop.
 
 ### ⚡ Hybrid AI Architecture
-- **Transcription:** [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (Medium model) with `int8` quantization — optimised for Apple Silicon.
+- **Local transcription:** [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (`small` model) with `int8` quantization — optimised for Apple Silicon.
 - **Cloud path:** Azure Speech Translation (primary) → Deepgram (fallback, optional).
-- **Translation fallback chain:** DeepL API → Google Translate → Argos (offline/local path).
+- **Translation fallback chain:** DeepL API → Google Translate → Argos (local/fallback path).
 - **Anti-hallucination:** 3-gram loop detection filter + temperature fallback.
 - **IPC:** ZeroMQ (ZMQ) for <5ms latency between Python engine and Electron.
 
@@ -62,12 +62,16 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for a full technical deep dive.
 ```mermaid
 graph TD
     Audio["System Audio (BlackHole)"] -->|sounddevice| PyEngine["Python AI Engine"]
-    PyEngine -->|VAD| Whisper["faster-whisper"]
-    Whisper -->|text| TranslationChain{"Translation Chain"}
+    PyEngine -->|cloud| Azure["Azure Speech Translation"]
+    PyEngine -->|fallback cloud| Deepgram["Deepgram"]
+    PyEngine -->|local| Whisper["faster-whisper (small)"]
+    Whisper -->|text| TranslationChain{"Local Translation Chain"}
     TranslationChain -->|"Tier 1"| DeepL["DeepL API"]
     TranslationChain -->|"Tier 2"| Google["Google Translate"]
     TranslationChain -->|"Tier 3 (offline)"| Argos["Argos Translate"]
-    TranslationChain -->|ZMQ TCP:5555| Electron["Electron Main"]
+    Azure -->|translated text| Electron["Electron Main"]
+    Deepgram -->|translated text| Electron
+    TranslationChain -->|ZMQ TCP:5555| Electron
     Electron -->|IPC| React["React Renderer (UI)"]
 ```
 
@@ -143,9 +147,6 @@ The Electron app will launch and spawn the Python AI engine automatically. For d
 ```bash
 # Run unit tests (Vitest)
 npm test
-
-# Lint
-npm run lint
 
 # Build production bundle
 npm run electron:build

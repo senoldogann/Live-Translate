@@ -26,13 +26,15 @@ graph TB
 
     subgraph "AI Core (Python Sidecar)"
         Engine[engine.py]
+        Azure[Azure Speech Translation]
+        Deepgram[Deepgram Fallback]
         Whisper[Faster-Whisper]
         VAD[Silencio VAD]
         ZMQ_Pub[ZMQ Publisher]
     end
 
     Main -->|Spawns| Engine
-    Engine -->|ZMQ TCP:5556| Main
+    Engine -->|ZMQ TCP:5555| Main
     Main -->|Electron IPC| App
     App -->|Events| Main
 ```
@@ -44,10 +46,12 @@ graph TB
 Tüm yapay zeka işlemleri `python/engine.py` içinde, Electron ana sürecinden bağımsız bir *child process* olarak çalışır.
 
 ### Teknoloji Yığını
-*   **STT Engine:** `faster-whisper` (CTranslate2 backend). Medium Model varsayılan olarak seçilmiştir. Apple Silicon üzerinde `int8` quantization ile çalışır.
+*   **Cloud Translation Engine:** `Azure Speech Translation` ana motor olarak kullanılır. Aynı stream içinde preview (`recognizing`) ve final (`recognized`) çeviri üretir.
+*   **Cloud Fallback:** `Deepgram` yalnızca Azure kimlik bilgileri yoksa veya Azure unavailable ise devreye girer.
+*   **Local STT Engine:** `faster-whisper` (CTranslate2 backend). `small` model varsayılan olarak seçilmiştir. Apple Silicon üzerinde `int8` quantization ile çalışır.
 *   **VAD (Voice Activity Detection):** `webrtcvad`. Sessizlik eşiği 400ms'ye indirilerek daha tepkisel hale getirilmiştir.
 *   **Translation Layer:**
-    *   *Tier 1 (Premium):* DeepL API. Fince gibi zor diller ve yüksek kalite için önceliklidir.
+    *   *Tier 1 (Premium):* DeepL API. Yerel modda veya fallback akışta daha iyi kalite için önceliklidir.
     *   *Tier 2 (Standard):* Google Translate. DeepL kotası biterse veya hata verirse devreye girer.
     *   *Tier 3 (Offline):* Argos Translate. İnternet kesilirse son çare olarak çalışır.
 *   **Logic Controllers:**
@@ -56,8 +60,8 @@ Tüm yapay zeka işlemleri `python/engine.py` içinde, Electron ana sürecinden 
 
 ### Modes & Threading
 İki farklı çalışma modu mevcuttur:
-1.  **Fast Mode (Streaming):** `0.05s` aralıkla kelime kelime yayın yapar. Gecikme minimumdur.
-2.  **Stable Mode (Strict):** Sadece `is_final=True` (cümle bitti) sinyali gelince yayın yapar. Yarım cümleleri asla göstermez.
+1.  **Fast Mode (Streaming):** Preview akışı daha agresiftir; konuşmacıya yetişmek için erken parça yayınlar.
+2.  **Stable Mode (Strict):** Final commit odaklıdır; daha az zıplar, daha rahat okunur.
 
 Threading Model:
 1.  `_audio_thread`: BlackHole'dan ham ses verisini okur.
@@ -70,7 +74,8 @@ Standart `stdio` (stdin/stdout) iletişimi yüksek frekanslı ses verisi akış�
 
 ### Protocol
 *   **Pattern:** Publisher-Subscriber (PUB/SUB)
-*   **Adres:** `tcp://127.0.0.1:5556`
+*   **Transcript Port:** `tcp://127.0.0.1:5555`
+*   **Command Port:** `tcp://127.0.0.1:5556`
 *   **Format:**
     ```text
     [TRANSCRIPT] {"original": "Hello", "translated": "Merhaba", "is_final": false}
@@ -86,16 +91,18 @@ Electron Main process bu portu dinler (`zmq.SUB`) ve gelen veriyi parse edip `ma
 Uygulamanın en kritik özelliği olan "Görünmezlik", macOS Window Server seviyesindeki hook'lar ile sağlanır.
 
 ### `NSWindowSharingNone`
-`electron/main.ts` dosyasında şu satır sihirli dokunuşu yapar:
+`electron/main.ts` dosyasında şu çağrı sihirli dokunuşu yapar:
 
 ```typescript
-win.setContentProtection(true);
+mainWindow.setContentProtection(true);
 ```
 
-Bu Electron API'si, arkaplanda macOS'un native `NSWindow.setSharingType(NSWindowSharingNone)` metodunu çağırır. Bu şu anlama gelir:
+Bu Electron API'si, arkaplanda macOS'un native pencere paylaşım korumasını açar. Bu şu anlama gelir:
 *   Pencere framebuffer'a çizilir (Kullanıcı görür).
 *   Ancak `CGWindowListCreateImage` gibi ekran yakalama API'leri bu pencereyi **render etmeyi reddeder** (Şeffaf veya yok sayılır).
 *   Sonuç: Zoom, Teams, OBS, QuickTime, Screenshot araçları pencereyi göremez.
+
+Not: Varsayılan açılış modu artık görünürdür. Kullanıcı Stealth düğmesine basınca bu koruma açılır; screenshot almak için görünür modda kalmak gerekir.
 
 ---
 
@@ -105,7 +112,7 @@ Pencere tam ekran (`fullscreen`) olsa da, kullanıcı arkadaki uygulamalara (ör
 
 Bu paradoks `useInteractiveZones` hook'u ile çözülmüştür:
 
-1.  **Polling:** React tarafı her 200ms'de bir butonların ve metinlerin koordinatlarını (`rect`) hesaplar.
+1.  **Polling:** React tarafı düzenli aralıklarla butonların ve metinlerin koordinatlarını (`rect`) hesaplar.
 2.  **IPC Sync:** Bu koordinatları Main process'e gönderir.
 3.  **Hole Punching:** Main process, bu koordinatlar **dışındaki** her yeri `setIgnoreMouseEvents(true, { forward: true })` yapar.
 
