@@ -276,6 +276,7 @@ body {
 
     /* Draggable region */
     -webkit-app-region: drag;
+    overflow: visible;
 }
 
 .control-bar-inner {
@@ -285,6 +286,7 @@ body {
 
     /* Non-draggable for buttons */
     -webkit-app-region: no-drag;
+    overflow: visible;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════
@@ -519,7 +521,11 @@ body {
     border-radius: var(--radius-sm);
     font-size: var(--font-size-xs);
     color: var(--color-text-primary);
-    white-space: nowrap;
+    width: max-content;
+    max-width: min(220px, calc(100vw - 32px));
+    white-space: normal;
+    text-align: center;
+    line-height: 1.35;
     opacity: 0;
     pointer-events: none;
     transition: opacity var(--transition-fast), transform var(--transition-fast);

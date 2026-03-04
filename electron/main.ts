@@ -1265,8 +1265,10 @@ function createStealthWindow(): BrowserWindow {
         },
     });
 
-    // Screen-share invisibility: NSWindowSharingNone (macOS)
-    win.setContentProtection(true);
+    // Match the renderer default: visible until the user explicitly enables stealth mode.
+    // This avoids a startup race where the UI looks visible but the native window is still
+    // protected from screenshots.
+    win.setContentProtection(false);
 
     // Visible on all Spaces and full-screen apps
     if (process.platform === 'darwin') {

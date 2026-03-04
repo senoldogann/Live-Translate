@@ -17,11 +17,11 @@ Please be respectful and professional in all interactions. We have zero toleranc
     *   `chore/cleanup`
 3.  **Dependencies:**
     ```bash
-    npm install
     npm run python:install
     ```
 4.  **Environment:**
-    *   Create a `.env` file and add `DEEPL_API_KEY` (if available).
+    *   Cloud testing için uygulama içindeki `API Ayarlari` ekranından `Azure Speech Key` + `Region` gir.
+    *   `Deepgram` ve `DeepL` tamamen isteğe bağlıdır; fallback / kalite katmanı olarak kullanılabilir.
 5.  **Coding:**
     *   **TypeScript:** Strict mode is active. Avoid using `any`.
     *   **React:** Use functional components and Hooks.

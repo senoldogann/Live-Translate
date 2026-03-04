@@ -183,6 +183,14 @@ describe('App Component', () => {
         }, { timeout: 1000 });
     });
 
+    it('syncs visible screenshot mode to Electron on initial mount', async () => {
+        render(<App />);
+
+        await screen.findByTestId('siri-wave', {}, { timeout: 1000 });
+
+        expect(window.electronAPI.toggleStealth).toHaveBeenCalledWith(false);
+    });
+
     it('replays current engine settings after the backend restarts', async () => {
         render(<App />);
 

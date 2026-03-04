@@ -286,6 +286,26 @@ Four bugs blocking the application:
 
 ---
 
+## OSS Release Polish Addendum – 2026-03-04
+
+**Status:** APPROVED  
+**Approved by:** User (open-source readiness + author visibility request)
+
+### Scope
+
+1. **Open-Source Metadata Alignment**
+   - Update package metadata so the repository clearly identifies Senol Dogan as the author/owner.
+   - Add standard repository/homepage/bugs metadata for GitHub consumers.
+
+2. **Documentation Accuracy**
+   - Align README and contributing docs with the actual Azure-first cloud flow instead of outdated Deepgram-only guidance.
+   - Keep setup instructions minimal and correct for new contributors.
+
+3. **Release Hygiene Verification**
+   - Re-check ignore rules and tracked files for build artifacts or obvious secret leakage before calling the repo open-source ready.
+
+---
+
 ## History De-Dupe Addendum – 2026-03-04
 
 **Status:** APPROVED  
@@ -430,3 +450,23 @@ Four bugs blocking the application:
 
 4. **Regression Coverage**
    - Extend component tests where the new UI entry point changes visible controls.
+
+---
+
+## Visible Mode & Tooltip Fix Addendum – 2026-03-04
+
+**Status:** APPROVED  
+**Approved by:** User (fix screenshot visibility and clipped hover labels)
+
+### Scope
+
+1. **Visible Screenshot Mode Sync**
+   - Align the native BrowserWindow content-protection default with the renderer's visible default.
+   - Push the current stealth state to Electron immediately on mount so screenshot visibility never depends on an engine-ready race.
+
+2. **Tooltip Headroom**
+   - Reserve extra vertical space while the control bar is visible so hover labels fit inside the frameless window.
+   - Make tooltip labels wrap more gracefully instead of clipping at the window edges.
+
+3. **Regression Coverage**
+   - Add React coverage that verifies the current stealth state is synced to Electron on initial mount.

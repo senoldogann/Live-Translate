@@ -59,6 +59,7 @@ const MAX_SUBTITLES = 1;
 // How long to wait after the last subtitle before showing the wave again (ms)
 const SILENCE_TIMEOUT_MS = 3000;
 const PREVIEW_THROTTLE_MS = 120;
+const TOOLTIP_HEADROOM_PX = 56;
 
 function App() {
     // ─── State ───────────────────────────────────────────────────────────────
@@ -370,11 +371,7 @@ function App() {
     }, [azureSpeechKey, azureSpeechRegion, deepgramKey, deeplKey]);
 
     const handleToggleStealth = useCallback(() => {
-        setIsStealthMode((prev) => {
-            const next = !prev;
-            window.electronAPI?.toggleStealth(next);
-            return next;
-        });
+        setIsStealthMode((prev) => !prev);
     }, []);
 
     const handleToggleListening = useCallback(() => {
@@ -470,6 +467,10 @@ function App() {
         }
     }, [historyWindowEntries, isHistoryWindowOpen]);
 
+    useEffect(() => {
+        window.electronAPI?.toggleStealth(isStealthMode);
+    }, [isStealthMode]);
+
     // ─── Dynamic Window Resizing ─────────────────────────────────────────────
     useEffect(() => {
         if (!containerRef.current) return;
@@ -478,9 +479,11 @@ function App() {
             if (!isSetupComplete) return;
 
             for (const entry of entries) {
-                // Add a small buffer but keep it tight
+                // Tooltip pseudo-elements do not affect layout, so reserve explicit headroom
+                // while the control bar is visible to prevent hover labels clipping.
                 const contentHeight = entry.contentRect.height + 20;
-                const targetHeight = Math.max(180, Math.ceil(contentHeight));
+                const tooltipHeadroom = showControlBar ? TOOLTIP_HEADROOM_PX : 0;
+                const targetHeight = Math.max(180, Math.ceil(contentHeight + tooltipHeadroom));
                 window.electronAPI?.setWindowHeight(targetHeight);
             }
         };

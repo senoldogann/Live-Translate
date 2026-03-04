@@ -2,8 +2,16 @@
     "name": "stealth-subtitle-translator",
     "version": "1.0.0",
     "description": "Real-time, privacy-focused desktop subtitle translation with stealth overlay",
-    "author": "Dogan",
+    "author": "Senol Dogan <https://github.com/senoldogann>",
     "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/senoldogann/Live-Translate.git"
+    },
+    "homepage": "https://github.com/senoldogann/Live-Translate",
+    "bugs": {
+        "url": "https://github.com/senoldogann/Live-Translate/issues"
+    },
     "main": "dist-electron/main.js",
     "type": "module",
     "scripts": {

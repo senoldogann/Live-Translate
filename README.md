@@ -9,6 +9,8 @@
 
 **Stealth Subtitle Translator** is a privacy-first live subtitle overlay for macOS. It uses AI to transcribe audio in real-time and translates it on-device or via cloud APIs — all while remaining **completely invisible to screen sharing tools** (Zoom, Teams, OBS, QuickTime).
 
+Created and maintained by **Senol Dogan**.
+
 ---
 
 ## Quick Start
@@ -21,12 +23,13 @@ npm run oss:start
 
 First launch notes:
 - Install [BlackHole 2ch](https://existential.audio/blackhole/) before starting the app.
-- Open `API Ayarlari` inside the app and paste your Deepgram / DeepL keys there.
+- Open `API Ayarlari` inside the app and paste your **Azure Speech** key + region there.
+- `Deepgram` is optional fallback. `DeepL` is optional extra translation quality / fallback.
 - On first run, the launcher bootstraps `node_modules` and `python/.venv` automatically.
 
 Fast checks after launch:
-- `Bulut` mode + `API Ayarlari` keys saved = Deepgram cloud STT path.
-- Console logs show the active translation provider per subtitle: `deepl`, `google`, `argos`, `fast-argos`, or `passthrough`.
+- `Bulut` mode + valid Azure key = Azure Speech real-time translation path.
+- Console logs show the active provider per subtitle: `azure-speech`, `deepl`, `google`, `argos`, `fast-argos`, or `passthrough`.
 
 ---
 
@@ -40,7 +43,8 @@ Uses macOS's native `NSWindowSharingNone` API to make the overlay window invisib
 
 ### ⚡ Hybrid AI Architecture
 - **Transcription:** [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (Medium model) with `int8` quantization — optimised for Apple Silicon.
-- **Translation fallback chain:** DeepL API → Google Translate → Argos (offline).
+- **Cloud path:** Azure Speech Translation (primary) → Deepgram (fallback, optional).
+- **Translation fallback chain:** DeepL API → Google Translate → Argos (offline/local path).
 - **Anti-hallucination:** 3-gram loop detection filter + temperature fallback.
 - **IPC:** ZeroMQ (ZMQ) for <5ms latency between Python engine and Electron.
 
@@ -80,7 +84,9 @@ graph TD
 | BlackHole 2ch | Virtual audio driver — [download here](https://existential.audio/blackhole/) |
 | Node.js 18+ | `brew install node` |
 
-Also recommended: a free [DeepL API key](https://www.deepl.com/pro-api) for higher-quality translations.
+Also recommended:
+- an Azure Speech resource for the best cloud experience
+- an optional [DeepL API key](https://www.deepl.com/pro-api) for local/fallback translation quality
 
 ### Installation
 
