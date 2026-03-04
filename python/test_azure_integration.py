@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from azure_translation_engine import AzureSpeechTranslationClient
-from engine import SubtitleEngine
+from engine import SubtitleEngine, EngineConfig, apply_runtime_env_overrides
 
 
 class DummyCloudClient:
@@ -21,6 +21,8 @@ class DummyCloudClient:
 class AzureSpeechClientTests(unittest.TestCase):
     def tearDown(self):
         os.environ.pop("AZURE_SPEECH_PHRASES", None)
+        os.environ.pop("ENGINE_TYPE", None)
+        os.environ.pop("ENGINE_SOURCE_LANG", None)
 
     def test_has_credentials_and_locale_mapping(self):
         client = AzureSpeechTranslationClient(None)
@@ -57,6 +59,19 @@ class AzureSpeechClientTests(unittest.TestCase):
 
         os.environ["AZURE_SPEECH_PHRASES"] = "Qdrant, LangGraph ,  Redis"
         self.assertEqual(client._get_phrase_hints(), ("Qdrant", "LangGraph", "Redis"))
+
+    def test_runtime_env_overrides_respect_saved_startup_mode(self):
+        config = EngineConfig()
+        config.engine_type = "local"
+        config.source_lang = "en"
+
+        os.environ["ENGINE_TYPE"] = "cloud"
+        os.environ["ENGINE_SOURCE_LANG"] = "fi"
+
+        apply_runtime_env_overrides(config)
+
+        self.assertEqual(config.engine_type, "cloud")
+        self.assertEqual(config.source_lang, "fi")
 
 
 class CloudBackendSelectionTests(unittest.TestCase):

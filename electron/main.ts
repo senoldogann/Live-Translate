@@ -1294,6 +1294,8 @@ function startPythonEngine(): ChildProcess | null {
     if (setupConfig.azureSpeechRegion) env.AZURE_SPEECH_REGION = setupConfig.azureSpeechRegion;
     if (setupConfig.deepgramKey) env.DEEPGRAM_API_KEY = setupConfig.deepgramKey;
     if (setupConfig.deeplKey) env.DEEPL_API_KEY = setupConfig.deeplKey;
+    if (setupConfig.language) env.ENGINE_SOURCE_LANG = setupConfig.language;
+    if (setupConfig.engineType) env.ENGINE_TYPE = setupConfig.engineType;
 
     try {
         const proc = spawn(venvPython, [pythonPath], {

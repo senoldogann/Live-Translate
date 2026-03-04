@@ -96,6 +96,39 @@ class EngineConfig:
 CONFIG = EngineConfig()
 
 
+def _parse_bool_env(value: Optional[str]) -> Optional[bool]:
+    if value is None:
+        return None
+
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def apply_runtime_env_overrides(config: EngineConfig) -> None:
+    source_lang = os.getenv("ENGINE_SOURCE_LANG", "").strip().lower()
+    if source_lang in {"en", "fi", "tr"}:
+        config.source_lang = source_lang
+
+    engine_type = os.getenv("ENGINE_TYPE", "").strip().lower()
+    if engine_type in {"local", "cloud"}:
+        config.engine_type = engine_type
+
+    streaming_mode = _parse_bool_env(os.getenv("ENGINE_STREAMING_MODE"))
+    if streaming_mode is not None:
+        config.streaming_mode = streaming_mode
+
+    is_listening = _parse_bool_env(os.getenv("ENGINE_IS_LISTENING"))
+    if is_listening is not None:
+        config.is_listening = is_listening
+
+
+apply_runtime_env_overrides(CONFIG)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # DATA STRUCTURES
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1154,9 +1187,16 @@ class SubtitleEngine:
                                 ):
                                     self._start_cloud_engine()
                             elif key == "engine_type":
-                                self.config.engine_type = str(value)
+                                next_engine_type = str(value)
+                                if next_engine_type != self.config.engine_type:
+                                    self._listening_epoch += 1
+                                    with self._audio_lock:
+                                        self._current_speech_audio.clear()
+                                    self._process_event.set()
+
+                                self.config.engine_type = next_engine_type
                                 print(f"[Command] Engine Type set to: {value}")
-                                if value == "cloud":
+                                if next_engine_type == "cloud":
                                     self._start_cloud_engine()
                                 else:
                                     self._stop_cloud_engine()
