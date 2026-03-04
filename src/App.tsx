@@ -39,11 +39,27 @@ interface SubtitleEntry {
     isFinal: boolean;
 }
 
+function isSameTranscriptPayload(
+    left: Pick<SubtitleEntry, 'original' | 'translated' | 'isFinal'> | null | undefined,
+    right: Pick<SubtitleEntry, 'original' | 'translated' | 'isFinal'> | null | undefined,
+): boolean {
+    if (!left || !right) {
+        return false;
+    }
+
+    return (
+        left.original === right.original
+        && left.translated === right.translated
+        && left.isFinal === right.isFinal
+    );
+}
+
 // Maximum number of subtitles to display at once
 const MAX_SUBTITLES = 1;
 
 // How long to wait after the last subtitle before showing the wave again (ms)
 const SILENCE_TIMEOUT_MS = 3000;
+const PREVIEW_THROTTLE_MS = 120;
 
 interface ApiKeySaveResult {
     ok: boolean;
@@ -78,7 +94,11 @@ function App() {
     // Whether speech is currently active (controls SiriWave ↔ Subtitle toggle)
     const [isSpeechActive, setIsSpeechActive] = useState(false);
     const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const queuedPreviewRef = useRef<SubtitleEntry | null>(null);
+    const lastPreviewFlushAtRef = useRef(0);
     const transcriptSequenceRef = useRef(0);
+    const lastCommittedTranscriptIdRef = useRef<string | null>(null);
 
     // ─── Lifecycle: Config Yükleme ───────────────────────────────────────────
     useEffect(() => {
@@ -133,9 +153,25 @@ function App() {
         }
     }, [isSetupComplete]);
 
+    const [previewSubtitle, setPreviewSubtitle] = useState<SubtitleEntry | null>(null);
+
+    const rawLiveSubtitle = subtitles[0] && !subtitles[0].isFinal ? subtitles[0] : null;
+    const latestCommittedTranscript = allTranscripts[allTranscripts.length - 1];
+    const activePreviewSubtitle = rawLiveSubtitle ? previewSubtitle : null;
+    const primaryOverlaySubtitle =
+        activePreviewSubtitle
+        ?? (rawLiveSubtitle ? (latestCommittedTranscript ?? rawLiveSubtitle) : (subtitles[0] ?? latestCommittedTranscript ?? null));
+    const committedOverlaySubtitle =
+        activePreviewSubtitle && latestCommittedTranscript && !isSameTranscriptPayload(latestCommittedTranscript, activePreviewSubtitle)
+            ? latestCommittedTranscript
+            : null;
+    const overlayOriginal = showOriginal
+        ? (activePreviewSubtitle?.original ?? rawLiveSubtitle?.original ?? primaryOverlaySubtitle?.original)
+        : undefined;
+    const liveHistoryEntry = rawLiveSubtitle;
     const historyWindowEntries =
-        subtitles[0] && !subtitles[0].isFinal
-            ? [...allTranscripts, subtitles[0]]
+        liveHistoryEntry && !isSameTranscriptPayload(latestCommittedTranscript, liveHistoryEntry)
+            ? [...allTranscripts, liveHistoryEntry]
             : allTranscripts;
 
     // ─── IPC Listeners ───────────────────────────────────────────────────────
@@ -173,6 +209,10 @@ function App() {
                 const now = Date.now();
                 const latest = prev[0];
 
+                if (data.isFinal && latest?.isFinal && isSameTranscriptPayload(latest, data)) {
+                    return prev;
+                }
+
                 // Case 1: Partial update — update or create partial card
                 if (!data.isFinal) {
                     if (latest && !latest.isFinal) {
@@ -190,7 +230,6 @@ function App() {
                 // Case 2: Final result — finalize the latest partial card
                 if (latest && !latest.isFinal) {
                     const finalized = { ...latest, original: data.original, translated: data.translated, timestamp: now, isFinal: true };
-                    setAllTranscripts(h => [...h, finalized]);
                     return [finalized, ...prev.slice(1)];
                 }
 
@@ -198,7 +237,6 @@ function App() {
                 const newFinal: SubtitleEntry = {
                     id: createTranscriptId(), original: data.original, translated: data.translated, timestamp: now, isFinal: true,
                 };
-                setAllTranscripts(h => [...h, newFinal]);
                 return [newFinal, ...prev].slice(0, MAX_SUBTITLES);
             });
         };
@@ -245,6 +283,69 @@ function App() {
         };
     }, [createTranscriptId, engineType, isListening, language, isStreaming, isStealthMode]);
 
+    useEffect(() => {
+        const latest = subtitles[0];
+
+        if (!latest?.isFinal) {
+            return;
+        }
+
+        if (lastCommittedTranscriptIdRef.current === latest.id) {
+            return;
+        }
+
+        setAllTranscripts((prev) => [...prev, latest]);
+        lastCommittedTranscriptIdRef.current = latest.id;
+    }, [subtitles]);
+
+    useEffect(() => {
+        if (!rawLiveSubtitle) {
+            if (previewTimerRef.current) {
+                clearTimeout(previewTimerRef.current);
+                previewTimerRef.current = null;
+            }
+            queuedPreviewRef.current = null;
+            setPreviewSubtitle(null);
+            lastPreviewFlushAtRef.current = 0;
+            return;
+        }
+
+        const flushPreview = (nextPreview: SubtitleEntry) => {
+            setPreviewSubtitle(nextPreview);
+            lastPreviewFlushAtRef.current = Date.now();
+        };
+
+        const now = Date.now();
+        const elapsed = now - lastPreviewFlushAtRef.current;
+
+        if (lastPreviewFlushAtRef.current === 0 || elapsed >= PREVIEW_THROTTLE_MS) {
+            queuedPreviewRef.current = null;
+            if (previewTimerRef.current) {
+                clearTimeout(previewTimerRef.current);
+                previewTimerRef.current = null;
+            }
+            flushPreview(rawLiveSubtitle);
+            return;
+        }
+
+        queuedPreviewRef.current = rawLiveSubtitle;
+
+        if (previewTimerRef.current === null) {
+            previewTimerRef.current = setTimeout(() => {
+                const queuedPreview = queuedPreviewRef.current;
+                if (queuedPreview) {
+                    flushPreview(queuedPreview);
+                }
+                queuedPreviewRef.current = null;
+                previewTimerRef.current = null;
+            }, PREVIEW_THROTTLE_MS - elapsed);
+        }
+
+        return () => {
+            // Timer cleanup is handled only when the live preview stream stops.
+        };
+    }, [rawLiveSubtitle]);
+
     // ─── Handlers ────────────────────────────────────────────────────────────
     const handleToggleStealth = useCallback(() => {
         setIsStealthMode((prev) => {
@@ -261,6 +362,10 @@ function App() {
 
             if (!next) {
                 if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+                if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+                queuedPreviewRef.current = null;
+                lastPreviewFlushAtRef.current = 0;
+                setPreviewSubtitle(null);
                 setSubtitles([]);
                 setIsSpeechActive(false);
                 setAudioLevel(0);
@@ -284,6 +389,10 @@ function App() {
 
     const handleRestartEngine = useCallback(() => {
         window.electronAPI?.restartEngine();
+        if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+        queuedPreviewRef.current = null;
+        lastPreviewFlushAtRef.current = 0;
+        setPreviewSubtitle(null);
         setSubtitles([]);
         setIsSpeechActive(false);
     }, []);
@@ -489,18 +598,19 @@ function App() {
                                     transition={{ duration: 0.25 }}
                                 >
                                     <AnimatePresence mode="wait">
-                                        {subtitles.map((subtitle, index) => (
+                                        {primaryOverlaySubtitle && (
                                             <SubtitleOverlay
-                                                key={subtitle.id}
-                                                original={showOriginal ? subtitle.original : undefined}
-                                                isFinal={subtitle.isFinal}
+                                                key={`${primaryOverlaySubtitle.id}-${committedOverlaySubtitle?.id ?? 'solo'}`}
+                                                original={overlayOriginal}
+                                                committedTranslated={committedOverlaySubtitle?.translated}
+                                                isFinal={primaryOverlaySubtitle.isFinal}
                                                 wordByWord={isWordByWord}
-                                                translated={subtitle.translated}
+                                                translated={primaryOverlaySubtitle.translated}
                                                 fontSize={fontSize}
                                                 opacity={opacity}
-                                                index={index}
+                                                index={0}
                                             />
-                                        ))}
+                                        )}
                                     </AnimatePresence>
                                 </motion.div>
                             ) : (

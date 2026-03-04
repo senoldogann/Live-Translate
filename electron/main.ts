@@ -10,6 +10,7 @@ import { app, BrowserWindow, ipcMain, screen, globalShortcut, shell } from 'elec
 import { spawn, ChildProcess, exec } from 'child_process';
 import path from 'path';
 import fs from 'fs';
+import * as net from 'net';
 import { promisify } from 'util';
 import { URL } from 'url';
 
@@ -232,14 +233,25 @@ let isInteractionEnabled = true;
 let hasReceivedZones = false;
 let historyWindow: BrowserWindow | null = null; // Transcript history window
 let latestHistoryTranscripts: unknown[] = [];
+let isQuitting = false;
+let pythonRecoveryInFlight = false;
 
 const COMMAND_RETRY_COUNT = 3;
 const COMMAND_RETRY_DELAY_MS = 100;
+const STALE_ENGINE_SHUTDOWN_RETRIES = 5;
+const STALE_ENGINE_SHUTDOWN_DELAY_MS = 150;
+const PYTHON_PORT_RELEASE_TIMEOUT_MS = 2000;
+const PYTHON_PORT_RELEASE_POLL_MS = 100;
+const PYTHON_RECOVERY_RETRY_DELAY_MS = 500;
 
 // Environment
 const isDev = !app.isPackaged;
 const VITE_DEV_SERVER_URL = 'http://localhost:5173';
-const ZMQ_ADDRESS = 'tcp://127.0.0.1:5555';
+const ZMQ_HOST = '127.0.0.1';
+const ZMQ_PORT = 5555;
+const ZMQ_COMMAND_PORT = 5556;
+const ZMQ_ADDRESS = `tcp://${ZMQ_HOST}:${ZMQ_PORT}`;
+const ZMQ_COMMAND_ADDRESS = `tcp://${ZMQ_HOST}:${ZMQ_COMMAND_PORT}`;
 
 function getPreloadPath() {
     return isDev
@@ -247,10 +259,69 @@ function getPreloadPath() {
         : path.join(__dirname, 'preload.js');
 }
 
+function getPythonScriptPath() {
+    return isDev
+        ? path.join(process.cwd(), 'python', 'engine.py')
+        : path.join(process.resourcesPath, 'python', 'engine.py');
+}
+
+function getPythonBinaryPath() {
+    return isDev
+        ? path.join(process.cwd(), 'python', '.venv', 'bin', 'python')
+        : path.join(process.resourcesPath, 'python', '.venv', 'bin', 'python');
+}
+
+function sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 function sendHistoryWindowState(isOpen: boolean) {
     if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('history-window-state', isOpen);
     }
+}
+
+function isLocalPortInUse(port: number, host = ZMQ_HOST): Promise<boolean> {
+    return new Promise(resolve => {
+        const server = net.createServer();
+
+        const finish = (inUse: boolean) => {
+            server.removeAllListeners();
+            resolve(inUse);
+        };
+
+        server.once('error', (error: NodeJS.ErrnoException) => {
+            if (error.code === 'EADDRINUSE') {
+                finish(true);
+                return;
+            }
+            console.warn(`[Main] Port probe failed for ${host}:${port}:`, error.message);
+            finish(false);
+        });
+
+        server.once('listening', () => {
+            server.close(() => finish(false));
+        });
+
+        server.listen(port, host);
+    });
+}
+
+async function waitForPortToBeFree(
+    port: number,
+    timeoutMs = PYTHON_PORT_RELEASE_TIMEOUT_MS,
+    pollIntervalMs = PYTHON_PORT_RELEASE_POLL_MS,
+): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+        if (!(await isLocalPortInUse(port))) {
+            return true;
+        }
+        await sleep(pollIntervalMs);
+    }
+
+    return !(await isLocalPortInUse(port));
 }
 
 function buildHistoryWindowHtml() {
@@ -493,14 +564,9 @@ function createStealthWindow(): BrowserWindow {
  * Python AI Engine'i başlat
  */
 function startPythonEngine(): ChildProcess | null {
-    const pythonPath = isDev
-        ? path.join(process.cwd(), 'python', 'engine.py')
-        : path.join(process.resourcesPath, 'python', 'engine.py');
-
-    // Virtual environment Python path
-    const venvPython = isDev
-        ? path.join(process.cwd(), 'python', '.venv', 'bin', 'python')
-        : path.join(process.resourcesPath, 'python', '.venv', 'bin', 'python');
+    const pythonPath = getPythonScriptPath();
+    const venvPython = getPythonBinaryPath();
+    let sawZmqBindConflict = false;
 
     console.log('[Main] Starting Python engine:', pythonPath);
     console.log('[Main] Using Python:', venvPython);
@@ -557,6 +623,9 @@ function startPythonEngine(): ChildProcess | null {
 
         proc.stderr?.on('data', (data: Buffer) => {
             const errorMsg = data.toString().trim();
+            if (errorMsg.includes('Address already in use') && errorMsg.includes(String(ZMQ_PORT))) {
+                sawZmqBindConflict = true;
+            }
             console.error('[Python Error]', errorMsg);
             // Forward to renderer via safe IPC (no executeJavaScript)
             if (mainWindow && !mainWindow.isDestroyed()) {
@@ -566,7 +635,16 @@ function startPythonEngine(): ChildProcess | null {
 
         proc.on('close', (code: number | null) => {
             console.log(`[Python] Process exited with code ${code}`);
-            pythonProcess = null;
+            if (pythonProcess?.pid === proc.pid) {
+                pythonProcess = null;
+            }
+
+            if (!isQuitting && sawZmqBindConflict) {
+                console.warn('[Main] Python hit a ZMQ bind conflict; retrying after stale-engine cleanup');
+                setTimeout(() => {
+                    void launchPythonEngineWithRecovery('bind-conflict');
+                }, PYTHON_RECOVERY_RETRY_DELAY_MS);
+            }
         });
 
         proc.on('error', (err: Error) => {
@@ -643,8 +721,8 @@ async function startZmqPublisher(): Promise<void> {
     try {
         const zmq = await import('zeromq');
         commandSock = new zmq.Publisher();
-        await commandSock.bind('tcp://127.0.0.1:5556');
-        console.log('[ZMQ] Command Publisher bound to tcp://127.0.0.1:5556');
+        await commandSock.bind(ZMQ_COMMAND_ADDRESS);
+        console.log(`[ZMQ] Command Publisher bound to ${ZMQ_COMMAND_ADDRESS}`);
     } catch (error) {
         console.error('[ZMQ] Failed to start publisher:', error);
     }
@@ -680,6 +758,127 @@ async function broadcastCommand(
     }
 
     return sent;
+}
+
+async function requestStaleEngineShutdown(): Promise<void> {
+    if (!commandSock) {
+        return;
+    }
+
+    if (!(await isLocalPortInUse(ZMQ_PORT))) {
+        return;
+    }
+
+    await broadcastCommand(
+        { type: 'shutdown' },
+        'shutdown stale python',
+        STALE_ENGINE_SHUTDOWN_RETRIES,
+        STALE_ENGINE_SHUTDOWN_DELAY_MS,
+    );
+}
+
+async function terminateLingeringPythonEngines(): Promise<number[]> {
+    if (process.platform === 'win32') {
+        return [];
+    }
+
+    const scriptPath = getPythonScriptPath().replace(/\\/g, '/');
+
+    try {
+        const { stdout } = await execAsync('ps -axo pid=,command=');
+        const terminated: number[] = [];
+
+        for (const line of stdout.split('\n')) {
+            const trimmed = line.trim();
+            if (!trimmed) {
+                continue;
+            }
+
+            const match = trimmed.match(/^(\d+)\s+(.+)$/);
+            if (!match) {
+                continue;
+            }
+
+            const pid = Number(match[1]);
+            const command = match[2].replace(/\\/g, '/');
+
+            if (!Number.isFinite(pid) || pid <= 0) {
+                continue;
+            }
+
+            if (!command.includes(scriptPath)) {
+                continue;
+            }
+
+            if (pythonProcess?.pid && pid === pythonProcess.pid) {
+                continue;
+            }
+
+            try {
+                process.kill(pid, 'SIGTERM');
+                terminated.push(pid);
+            } catch (error) {
+                console.warn(`[Main] Failed to terminate lingering Python engine PID ${pid}:`, error);
+            }
+        }
+
+        if (terminated.length > 0) {
+            console.warn(`[Main] Terminated lingering Python engine(s): ${terminated.join(', ')}`);
+        }
+
+        return terminated;
+    } catch (error) {
+        console.warn('[Main] Failed to scan for lingering Python engines:', error);
+        return [];
+    }
+}
+
+async function recoverStalePythonEngines(): Promise<boolean> {
+    await requestStaleEngineShutdown();
+    const terminated = await terminateLingeringPythonEngines();
+    const portFreed = await waitForPortToBeFree(
+        ZMQ_PORT,
+        terminated.length > 0 ? PYTHON_PORT_RELEASE_TIMEOUT_MS : PYTHON_PORT_RELEASE_TIMEOUT_MS / 2,
+    );
+
+    if (!portFreed) {
+        console.warn(`[Main] Port ${ZMQ_PORT} is still busy after recovery attempts`);
+    }
+
+    return portFreed;
+}
+
+async function launchPythonEngineWithRecovery(reason: string): Promise<void> {
+    if (isQuitting) {
+        return;
+    }
+
+    if (pythonRecoveryInFlight) {
+        console.log(`[Main] Python recovery already in progress (${reason})`);
+        return;
+    }
+
+    pythonRecoveryInFlight = true;
+
+    try {
+        console.log(`[Main] Preparing Python engine launch (${reason})...`);
+        const portFreed = await recoverStalePythonEngines();
+
+        if (!portFreed) {
+            const message = `[Main] Python launch aborted: ZMQ port ${ZMQ_PORT} is still occupied`;
+            console.error(message);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('engine-log', message);
+            }
+            return;
+        }
+
+        if (!pythonProcess) {
+            pythonProcess = startPythonEngine();
+        }
+    } finally {
+        pythonRecoveryInFlight = false;
+    }
 }
 
 /**
@@ -1121,7 +1320,7 @@ if (!gotTheLock) {
 
         // Delay Python engine startup to let Vite dev server stabilize
         setTimeout(() => {
-            pythonProcess = startPythonEngine();
+            void launchPythonEngineWithRecovery('startup');
         }, 1000);
 
         // Start ZMQ subscriber after Python has had time to bind its port
@@ -1175,6 +1374,7 @@ app.on('activate', () => {
 // Cleanup
 app.on('before-quit', () => {
     console.log('[Main] Cleaning up...');
+    isQuitting = true;
 
     // Unregister all global shortcuts
     globalShortcut.unregisterAll();

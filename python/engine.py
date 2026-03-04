@@ -1008,6 +1008,10 @@ class SubtitleEngine:
                                     self.translator.deepl_translator.update_api_key(
                                         dl_key
                                     )
+                        elif data.get("type") == "shutdown":
+                            print("[Command] Shutdown requested by Electron")
+                            self.stop()
+                            break
                     except json.JSONDecodeError:
                         pass
 
@@ -1230,14 +1234,24 @@ class SubtitleEngine:
         self.publisher.stop()
         self._deepgram.stop()
 
+        current_thread = threading.current_thread()
+
         # Wait for processing thread
-        if self._process_thread:
+        if self._process_thread and self._process_thread is not current_thread:
             self._process_thread.join(timeout=2.0)
 
-        if self._command_thread:
+        if self._command_thread and self._command_thread is not current_thread:
             # Often ZMQ receive is blocking, so maybe it won't join easily without a message
             # But we used poll(timeout=500), so it should exit within 0.5s
             self._command_thread.join(timeout=2.0)
+
+        if self._command_socket:
+            self._command_socket.close(0)
+            self._command_socket = None
+
+        if self._command_context:
+            self._command_context.term()
+            self._command_context = None
 
         print("[Engine] Stopped")
 

@@ -17,6 +17,7 @@ const FINAL_REVEAL_DELAY_MS = 18;
 
 interface SubtitleOverlayProps {
     original?: string;
+    committedTranslated?: string;
     translated: string;
     fontSize?: number;
     opacity?: number;
@@ -42,6 +43,7 @@ function countSharedWordPrefix(left: string[], right: string[]): number {
 
 function SubtitleOverlay({
     original,
+    committedTranslated,
     translated,
     fontSize = 18,
     opacity = 0.9,
@@ -147,6 +149,9 @@ function SubtitleOverlay({
 
     // Dynamic opacity
     const dynamicOpacity = Math.max(0.5, opacity - index * 0.15);
+    const showCommittedContext =
+        Boolean(committedTranslated?.trim())
+        && committedTranslated?.trim() !== translated.trim();
 
     return (
         <motion.div
@@ -177,6 +182,46 @@ function SubtitleOverlay({
                     }}
                 >
                     {original} {isFinal ? '' : '...'}
+                </motion.div>
+            )}
+
+            {showCommittedContext && (
+                <motion.div
+                    className="subtitle-committed"
+                    initial={false}
+                    animate={{ opacity: 1, y: 0 }}
+                    style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        marginBottom: 8,
+                        fontSize: Math.max(11, fontSize - 6),
+                        color: 'rgba(255,255,255,0.72)',
+                        lineHeight: 1.4,
+                    }}
+                >
+                    <span
+                        style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            padding: '2px 7px',
+                            borderRadius: 999,
+                            fontSize: Math.max(10, fontSize - 9),
+                            fontWeight: 700,
+                            letterSpacing: '0.04em',
+                            textTransform: 'uppercase',
+                            color: '#c4b5fd',
+                            background: 'rgba(167,139,250,0.12)',
+                            border: '1px solid rgba(167,139,250,0.22)',
+                            flexShrink: 0,
+                        }}
+                    >
+                        Stabil
+                    </span>
+                    <span style={{ opacity: 0.95 }}>
+                        {committedTranslated}
+                    </span>
                 </motion.div>
             )}
 

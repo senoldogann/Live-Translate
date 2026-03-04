@@ -238,3 +238,58 @@ Four bugs blocking the application:
 4. **Git Hygiene**
    - Ignore generated release artifacts and interpreter caches that should never be committed in the open-source workflow.
    - Push the verified repository state to GitHub after the ignore rules are in place.
+
+---
+
+## ZMQ Startup Recovery Addendum – 2026-03-04
+
+**Status:** APPROVED  
+**Approved by:** User (`Address already in use` startup failure report)
+
+### Scope
+
+1. **Stale Python Engine Recovery**
+   - Detect and clean up lingering `python/engine.py` processes before launching a new engine instance.
+   - Prefer graceful shutdown over hard kills, but force recovery if an older orphan process is still holding the data socket.
+
+2. **Port Availability Guard**
+   - Wait for the ZMQ data port to become free before spawning the next engine instance.
+   - If a bind conflict still happens, trigger a single self-healing restart path instead of failing silently.
+
+3. **Graceful Engine Shutdown Command**
+   - Add an explicit command path so Electron can tell an already-running Python engine to stop cleanly during startup recovery.
+
+---
+
+## History De-Dupe Addendum – 2026-03-04
+
+**Status:** APPROVED  
+**Approved by:** User (duplicate transcript history report)
+
+### Scope
+
+1. **StrictMode-Safe History Commits**
+   - Remove nested history writes from inside React state updater callbacks.
+   - Commit finalized subtitles to transcript history in a side-effect-safe path so dev-mode double invokes do not duplicate entries.
+
+2. **Live Entry De-Duplication**
+   - Stop showing the live partial row in the native history window when it is identical to the most recent committed final entry.
+
+3. **Regression Coverage**
+   - Add a focused renderer test that repeated identical final updates do not create duplicate history rows.
+
+---
+
+## Preview Catch-Up Addendum – 2026-03-04
+
+**Status:** APPROVED  
+**Approved by:** User (preview still trailing one sentence behind)
+
+### Scope
+
+1. **Replace Debounce With Leading Throttle**
+   - Stop resetting preview visibility on every partial transcript update.
+   - Show the first preview immediately, then rate-limit follow-up updates so continuous speech still advances in near real time.
+
+2. **Regression Coverage**
+   - Update renderer tests so the preview path proves the new clause is visible immediately rather than only after a pause.

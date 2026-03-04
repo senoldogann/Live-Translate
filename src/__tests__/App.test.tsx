@@ -1,13 +1,14 @@
-import { render, screen, act } from '@testing-library/react';
+import { render, screen, act, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import App from '../App';
 
 // Mock dependencies
 vi.mock('../components/SubtitleOverlay', () => ({
-    default: vi.fn(({ original, translated, isFinal }) => (
+    default: vi.fn(({ original, translated, committedTranslated, isFinal }) => (
         <div data-testid="subtitle-overlay">
-            <span>{original}</span>
-            <span>{translated}</span>
+            <span data-testid="overlay-original">{original}</span>
+            {committedTranslated && <span data-testid="overlay-committed">{committedTranslated}</span>}
+            <span data-testid="overlay-translated">{translated}</span>
             <span data-testid="final-status">{isFinal ? 'FINAL' : 'PARTIAL'}</span>
         </div>
     ))
@@ -108,6 +109,7 @@ describe('App Component', () => {
 
     afterEach(() => {
         vi.clearAllMocks();
+        vi.useRealTimers();
     });
 
     it('renders and handles partial -> final transcript flow without flickering', async () => {
@@ -141,7 +143,9 @@ describe('App Component', () => {
             });
         });
 
-        expect(screen.getByText('Merhaba Dünya')).toBeInTheDocument();
+        await waitFor(() => {
+            expect(screen.getByText('Merhaba Dünya')).toBeInTheDocument();
+        }, { timeout: 1000 });
 
         // 3. Receive Final
         act(() => {
@@ -153,8 +157,10 @@ describe('App Component', () => {
             });
         });
 
-        expect(screen.getByText('Merhaba Dünya.')).toBeInTheDocument();
-        expect(screen.getByTestId('final-status')).toHaveTextContent('FINAL');
+        await waitFor(() => {
+            expect(screen.getByText('Merhaba Dünya.')).toBeInTheDocument();
+            expect(screen.getByTestId('final-status')).toHaveTextContent('FINAL');
+        }, { timeout: 1000 });
     });
 
     it('replays current engine settings after the backend restarts', async () => {
@@ -170,6 +176,40 @@ describe('App Component', () => {
         expect(window.electronAPI.setStreamingMode).toHaveBeenCalledWith(false);
         expect(window.electronAPI.setEngineType).toHaveBeenCalledWith('local');
         expect(window.electronAPI.toggleStealth).toHaveBeenCalledWith(false);
+    });
+
+    it('shows the new preview immediately while keeping the last finalized Turkish line as context', async () => {
+        render(<App />);
+
+        await screen.findByTestId('siri-wave', {}, { timeout: 1000 });
+
+        act(() => {
+            mockOnTranscriptUpdate({
+                original: 'Stable sentence',
+                translated: 'Net cumle',
+                isFinal: true,
+                timestamp: 1100,
+            });
+        });
+
+        await screen.findByTestId('subtitle-overlay', {}, { timeout: 1000 });
+        expect(screen.getByTestId('overlay-translated')).toHaveTextContent('Net cumle');
+        expect(screen.queryByTestId('overlay-committed')).not.toBeInTheDocument();
+
+        act(() => {
+            mockOnTranscriptUpdate({
+                original: 'Preview sentence',
+                translated: 'Taslak cumle',
+                isFinal: false,
+                timestamp: 1101,
+            });
+        });
+
+        await waitFor(() => {
+            expect(screen.getByTestId('overlay-original')).toHaveTextContent('Preview sentence');
+            expect(screen.getByTestId('overlay-translated')).toHaveTextContent('Taslak cumle');
+            expect(screen.getByTestId('overlay-committed')).toHaveTextContent('Net cumle');
+        }, { timeout: 1000 });
     });
 
     it('sends a real listening command when pause is toggled', async () => {
@@ -229,6 +269,55 @@ describe('App Component', () => {
             expect.objectContaining({
                 original: 'Live sentence',
                 translated: 'Canli cumle',
+                isFinal: true,
+            }),
+        ]);
+    });
+
+    it('does not duplicate transcript history when the same final update arrives twice', async () => {
+        render(<App />);
+
+        await screen.findByTestId('siri-wave', {}, { timeout: 1000 });
+
+        act(() => {
+            screen.getByTestId('toggle-history').click();
+        });
+
+        act(() => {
+            mockOnHistoryWindowState?.(true);
+        });
+
+        act(() => {
+            mockOnTranscriptUpdate({
+                original: 'Repeated sentence',
+                translated: 'Tekrarlanan cumle',
+                isFinal: false,
+                timestamp: 2001,
+            });
+        });
+
+        act(() => {
+            mockOnTranscriptUpdate({
+                original: 'Repeated sentence',
+                translated: 'Tekrarlanan cumle',
+                isFinal: true,
+                timestamp: 2002,
+            });
+        });
+
+        act(() => {
+            mockOnTranscriptUpdate({
+                original: 'Repeated sentence',
+                translated: 'Tekrarlanan cumle',
+                isFinal: true,
+                timestamp: 2003,
+            });
+        });
+
+        expect(window.electronAPI.updateHistoryWindow).toHaveBeenLastCalledWith([
+            expect.objectContaining({
+                original: 'Repeated sentence',
+                translated: 'Tekrarlanan cumle',
                 isFinal: true,
             }),
         ]);
