@@ -1697,7 +1697,9 @@ function setupIpcHandlers(): void {
 
                 mainWindow.setBounds({
                     x: currentX,
-                    y: currentY,
+                    // Keep the bottom edge fixed so the control bar does not "jump" upward
+                    // when content is hidden (for example when entering stealth mode).
+                    y: currentY - heightDiff,
                     width: currentWidth,
                     height: Math.floor(newHeight)
                 });

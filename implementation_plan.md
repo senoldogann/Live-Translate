@@ -491,3 +491,25 @@ Four bugs blocking the application:
 3. **Release Verification**
    - Re-run the project verification suite after cleanup.
    - Push the cleaned state to GitHub only after the repo is still healthy.
+
+---
+
+## Stealth UX Polish Addendum – 2026-03-04
+
+**Status:** APPROVED  
+**Approved by:** User (fix stealth mode jump, stray animation, and hover labels)
+
+### Scope
+
+1. **Stealth Transition Cleanup**
+   - Remove the lingering content exit animation when switching into stealth mode so no wave/subtitle artifact remains above the control bar.
+
+2. **Bottom-Anchored Resizing**
+   - Keep the control bar visually anchored while the overlay height changes.
+   - Resize the frameless window from the top edge so content grows and shrinks upward instead of dragging the bar upward.
+
+3. **Stealth Tooltip Suppression**
+   - Disable hover tooltips while stealth mode is active so screenshots and clean overlays are not polluted by labels.
+
+4. **Regression Coverage**
+   - Add component coverage for the stealth tooltip-disabled state.

@@ -85,4 +85,9 @@ describe('ControlBar Component', () => {
         fireEvent.click(settingsBtn);
         expect(props.onShowApiSettings).toHaveBeenCalledTimes(1);
     });
+
+    it('disables hover tooltips when requested', () => {
+        const { container } = render(<ControlBar {...props} showTooltips={false} />);
+        expect(container.querySelector('.control-bar-inner')).toHaveAttribute('data-tooltips-disabled', 'true');
+    });
 });

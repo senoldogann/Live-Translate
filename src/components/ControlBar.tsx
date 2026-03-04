@@ -42,6 +42,7 @@ interface ControlBarProps {
     onEngineTypeChange: (type: 'local' | 'cloud') => void;
     onShowApiSettings: () => void;
     onShowUsageGuide: () => void;
+    showTooltips?: boolean;
 }
 
 // Icons (inline SVG for bundle size)
@@ -182,6 +183,7 @@ function ControlBar({
     onEngineTypeChange,
     onShowApiSettings,
     onShowUsageGuide,
+    showTooltips = true,
 }: ControlBarProps) {
     const [isDragging, setIsDragging] = useState(false);
     const dragStartPos = useRef({ x: 0, y: 0 });
@@ -226,7 +228,10 @@ function ControlBar({
             onMouseUp={handleDragEnd}
             onMouseLeave={handleDragEnd}
         >
-            <div className="control-bar-inner">
+            <div
+                className="control-bar-inner"
+                data-tooltips-disabled={showTooltips ? 'false' : 'true'}
+            >
                 {/* Status indicator */}
                 <div
                     className={`status-dot tooltip ${isListening ? 'listening' : 'paused'}`}

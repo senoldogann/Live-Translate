@@ -482,7 +482,7 @@ function App() {
                 // Tooltip pseudo-elements do not affect layout, so reserve explicit headroom
                 // while the control bar is visible to prevent hover labels clipping.
                 const contentHeight = entry.contentRect.height + 20;
-                const tooltipHeadroom = showControlBar ? TOOLTIP_HEADROOM_PX : 0;
+                const tooltipHeadroom = showControlBar && !isStealthMode ? TOOLTIP_HEADROOM_PX : 0;
                 const targetHeight = Math.max(180, Math.ceil(contentHeight + tooltipHeadroom));
                 window.electronAPI?.setWindowHeight(targetHeight);
             }
@@ -491,7 +491,7 @@ function App() {
         const resizeObserver = new ResizeObserver(handleResize);
         resizeObserver.observe(containerRef.current);
         return () => resizeObserver.disconnect();
-    }, [subtitles, showControlBar, fontSize]);
+    }, [subtitles, showControlBar, fontSize, isStealthMode]);
 
     // ─── Render ──────────────────────────────────────────────────────────────
     if (isSetupComplete === null) {
@@ -516,66 +516,63 @@ function App() {
         <div ref={containerRef} className="app-container" style={{ height: 'fit-content' }}>
 
             {/* ── Content Zone: hidden in stealth mode ── */}
-            <AnimatePresence>
-                {!isStealthMode && (
-                    <motion.div
-                        key="content-zone"
-                        className="content-zone"
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                        transition={{ duration: 0.25 }}
-                        style={{ overflow: 'hidden', width: '100%' }}
-                    >
-                        <AnimatePresence mode="wait">
-                            {isSpeechActive ? (
-                                /* ── SUBTITLES ── */
-                                <motion.div
-                                    key="subtitles"
-                                    className="subtitle-area"
-                                    initial={{ opacity: 0, y: 6 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    exit={{ opacity: 0, y: -6 }}
-                                    transition={{ duration: 0.25 }}
-                                >
-                                    <AnimatePresence mode="wait">
-                                        {primaryOverlaySubtitle && (
-                                            <SubtitleOverlay
-                                                key={primaryOverlaySubtitle.id}
-                                                original={overlayOriginal}
-                                                isFinal={primaryOverlaySubtitle.isFinal}
-                                                wordByWord={isWordByWord}
-                                                translated={primaryOverlaySubtitle.translated}
-                                                fontSize={fontSize}
-                                                opacity={opacity}
-                                                index={0}
-                                            />
-                                        )}
-                                    </AnimatePresence>
-                                </motion.div>
-                            ) : (
-                                /* ── SIRI WAVE (idle) ── */
-                                <motion.div
-                                    key="siriwave"
-                                    className="wave-zone"
-                                    initial={{ opacity: 0 }}
-                                    animate={{ opacity: 1 }}
-                                    exit={{ opacity: 0 }}
-                                    transition={{ duration: 0.4 }}
-                                    style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '8px 0' }}
-                                >
-                                    <SiriWave
-                                        isActive={isListening}
-                                        amplitude={audioLevel}
-                                        width={320}
-                                        height={64}
-                                    />
-                                </motion.div>
-                            )}
-                        </AnimatePresence>
-                    </motion.div>
-                )}
-            </AnimatePresence>
+            {!isStealthMode && (
+                <motion.div
+                    key="content-zone"
+                    className="content-zone"
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    transition={{ duration: 0.25 }}
+                    style={{ overflow: 'hidden', width: '100%' }}
+                >
+                    <AnimatePresence mode="wait">
+                        {isSpeechActive ? (
+                            /* ── SUBTITLES ── */
+                            <motion.div
+                                key="subtitles"
+                                className="subtitle-area"
+                                initial={{ opacity: 0, y: 6 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -6 }}
+                                transition={{ duration: 0.25 }}
+                            >
+                                <AnimatePresence mode="wait">
+                                    {primaryOverlaySubtitle && (
+                                        <SubtitleOverlay
+                                            key={primaryOverlaySubtitle.id}
+                                            original={overlayOriginal}
+                                            isFinal={primaryOverlaySubtitle.isFinal}
+                                            wordByWord={isWordByWord}
+                                            translated={primaryOverlaySubtitle.translated}
+                                            fontSize={fontSize}
+                                            opacity={opacity}
+                                            index={0}
+                                        />
+                                    )}
+                                </AnimatePresence>
+                            </motion.div>
+                        ) : (
+                            /* ── SIRI WAVE (idle) ── */
+                            <motion.div
+                                key="siriwave"
+                                className="wave-zone"
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={{ opacity: 0 }}
+                                transition={{ duration: 0.4 }}
+                                style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '8px 0' }}
+                            >
+                                <SiriWave
+                                    isActive={isListening}
+                                    amplitude={audioLevel}
+                                    width={320}
+                                    height={64}
+                                />
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+                </motion.div>
+            )}
 
             {/* ── Restore button (when control bar hidden) ── */}
             {!showControlBar && (
@@ -633,6 +630,7 @@ function App() {
                     onEngineTypeChange={handleEngineTypeChange}
                     onShowApiSettings={openApiSettingsWindow}
                     onShowUsageGuide={() => window.electronAPI?.openUsageGuideWindow?.()}
+                    showTooltips={!isStealthMode}
                 />
 
             </motion.div>

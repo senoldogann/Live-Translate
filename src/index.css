@@ -539,6 +539,10 @@ body {
     transform: translateX(-50%) translateY(0);
 }
 
+.control-bar-inner[data-tooltips-disabled="true"] .tooltip::after {
+    display: none;
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════════
    DIVIDER
    ═══════════════════════════════════════════════════════════════════════════════ */
