@@ -5,7 +5,7 @@
  * Renderer process'e sadece gerekli API'leri expose eder.
  */
 
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, clipboard } = require('electron');
 
 const electronAPI = {
     // ═══════════════════════════════════════════════════════════════
@@ -182,6 +182,9 @@ const electronAPI = {
     validateApiKeys: (keys) => ipcRenderer.invoke('validate-api-keys', keys),
     checkBlackhole: () => ipcRenderer.invoke('check-blackhole'),
     openUrl: (url) => ipcRenderer.send('open-url', url),
+    copyToClipboard: (text) => {
+        clipboard.writeText(text);
+    },
 };
 
 // Expose to renderer

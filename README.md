@@ -1,5 +1,14 @@
 # Stealth Subtitle Translator
 
+
+İstediğiniz arka planda çalıştırma özelliğini ekledim ve sistem performansına dair analizi tamamladım.
+
+Yeni Scriptler: Uygulamayı bash scripts/launch_bg.sh ile arka planda başlatabilir, bash scripts/stop_app.sh ile durdurabilirsiniz.
+Performans: "Bulut" (Azure) modunda sistem neredeyse hiç yorulmaz. "Yerel" modda (Whisper) ise Apple Silicon işlemcilerde %15-40 arası CPU kullanır ancak bu günlük kullanımı etkilemez.
+Detaylı kullanım rehberi ve performans tablosunu hazırladığım raporda bulabilirsiniz.
+
+
+
 > **Real-time AI transcription + translation — invisible to screen sharing**
 
 ![Version](https://img.shields.io/badge/version-1.0.0-blue?style=for-the-badge)

@@ -325,6 +325,7 @@ let latestApiSettingsDraft: ApiSettingsDraft = {
     deeplKey: '',
 };
 let isQuitting = false;
+let isStealthModeMain = false; // Tracks global stealth state for all windows
 let pythonRecoveryInFlight = false;
 
 const COMMAND_RETRY_COUNT = 3;
@@ -587,6 +588,34 @@ function buildHistoryWindowHtml() {
       margin-bottom: 6px;
       line-height: 1.45;
       word-break: break-word;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .original-content { flex: 1; }
+    .copy-btn {
+      flex-shrink: 0;
+      width: 20px;
+      height: 20px;
+      padding: 3px;
+      border-radius: 4px;
+      color: rgba(0, 0, 0, 0.3);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+      border: 1px solid transparent;
+      margin-top: -2px;
+    }
+    .copy-btn:hover {
+      background: rgba(255,255,255,0.08);
+      color: rgba(21, 4, 4, 0.8);
+      border-color: rgba(255,255,255,0.1);
+    }
+    .copy-btn.copied {
+      color: #22c55e;
     }
     .translated {
       font-size: 18px;
@@ -647,6 +676,25 @@ function buildHistoryWindowHtml() {
         return \`\${hh}:\${mm}:\${ss}\`;
       };
 
+      const copyIcon = \`<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>\`;
+      const checkIcon = \`<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>\`;
+
+      document.addEventListener('click', (e) => {
+        const btn = e.target.closest('.copy-btn');
+        if (btn) {
+          const text = btn.getAttribute('data-text');
+          if (window.electronAPI?.copyToClipboard) {
+            window.electronAPI.copyToClipboard(text);
+            btn.classList.add('copied');
+            btn.innerHTML = checkIcon;
+            setTimeout(() => {
+              btn.classList.remove('copied');
+              btn.innerHTML = copyIcon;
+            }, 1500);
+          }
+        }
+      });
+
       const render = (entries) => {
         const list = Array.isArray(entries) ? [...entries].reverse() : [];
         meta.textContent = \`\${list.length} entries\`;
@@ -661,8 +709,13 @@ function buildHistoryWindowHtml() {
             <div class="time">\${formatTime(item.timestamp)}</div>
             <div class="texts">
               <div class="original">
-                \${escapeHtml(item.original)}
-                \${item.isFinal === false ? '<span class="badge">Live</span>' : ''}
+                <span class="original-content">
+                  \${escapeHtml(item.original)}
+                  \${item.isFinal === false ? '<span class="badge">Live</span>' : ''}
+                </span>
+                <button class="copy-btn" data-text="\${escapeHtml(item.original)}" title="Copy Original">
+                  \${copyIcon}
+                </button>
               </div>
               <div class="translated">\${escapeHtml(item.translated)}</div>
             </div>
@@ -1125,7 +1178,7 @@ function createUtilityWindow(options: {
     title: string;
     backgroundColor?: string;
 }): BrowserWindow {
-    return new BrowserWindow({
+    const win = new BrowserWindow({
         width: options.width,
         height: options.height,
         minWidth: options.minWidth,
@@ -1141,6 +1194,11 @@ function createUtilityWindow(options: {
             sandbox: false,
         },
     });
+
+    // Apply global stealth state
+    win.setContentProtection(isStealthModeMain);
+
+    return win;
 }
 
 async function saveApiSettingsDraft(draft: unknown): Promise<ApiSettingsSaveResult> {
@@ -1265,10 +1323,8 @@ function createStealthWindow(): BrowserWindow {
         },
     });
 
-    // Match the renderer default: visible until the user explicitly enables stealth mode.
-    // This avoids a startup race where the UI looks visible but the native window is still
-    // protected from screenshots.
-    win.setContentProtection(false);
+    // Match the current global stealth state
+    win.setContentProtection(isStealthModeMain);
 
     // Visible on all Spaces and full-screen apps
     if (process.platform === 'darwin') {
@@ -1907,11 +1963,17 @@ function setupIpcHandlers(): void {
 
     // Stealth mode toggle (macOS only — no-op on other platforms)
     ipcMain.on('toggle-stealth', (_event, enabled: boolean) => {
-        if (mainWindow) {
-            mainWindow.setContentProtection(enabled);
-            if (process.platform !== 'darwin') {
-                console.warn('[Main] setContentProtection is only effective on macOS');
+        isStealthModeMain = enabled;
+        const allWindows = BrowserWindow.getAllWindows();
+
+        for (const win of allWindows) {
+            if (!win.isDestroyed()) {
+                win.setContentProtection(enabled);
             }
+        }
+
+        if (process.platform !== 'darwin' && enabled) {
+            console.warn('[Main] setContentProtection is only effective on macOS');
         }
     });
 
@@ -1977,6 +2039,9 @@ function setupIpcHandlers(): void {
                 sandbox: false,
             },
         });
+
+        // Apply global stealth state
+        historyWindow.setContentProtection(isStealthModeMain);
 
         historyWindow.webContents.on('did-finish-load', () => {
             pushHistoryDataToWindow();
