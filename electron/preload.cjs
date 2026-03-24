@@ -115,6 +115,11 @@ const electronAPI = {
         return () => ipcRenderer.removeListener('history-data', handler);
     },
 
+    getHistoryDates: () => ipcRenderer.invoke('get-history-dates'),
+    getHistoryByDate: (date) => ipcRenderer.invoke('get-history-by-date', date),
+    generateOllamaReport: (transcripts) => ipcRenderer.invoke('generate-ollama-report', transcripts),
+    saveReportToDesktop: (reportText) => ipcRenderer.invoke('save-report-to-desktop', reportText),
+
     openApiSettingsWindow: (draft) => {
         ipcRenderer.send('open-api-settings-window', draft);
     },
@@ -185,6 +190,7 @@ const electronAPI = {
     copyToClipboard: (text) => {
         clipboard.writeText(text);
     },
+    fetchOllamaModels: (endpoint, apiKey) => ipcRenderer.invoke('fetch-ollama-models', endpoint, apiKey),
 };
 
 // Expose to renderer

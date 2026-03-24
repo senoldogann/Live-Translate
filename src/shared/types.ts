@@ -62,6 +62,9 @@ export interface ApiSettingsDraft {
     azureSpeechRegion: string;
     deepgramKey: string;
     deeplKey: string;
+    ollamaEndpoint: string;
+    ollamaApiKey: string;
+    ollamaModel: string;
 }
 
 export interface ApiSettingsSaveResult {
@@ -81,6 +84,9 @@ export interface SetupConfig {
     azureSpeechRegion?: string;
     deepgramKey?: string;
     deeplKey?: string;
+    ollamaEndpoint?: string;
+    ollamaApiKey?: string;
+    ollamaModel?: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -154,6 +160,8 @@ export interface ElectronAPI {
     updateHistoryWindow?: (transcripts: unknown[]) => void;
     onHistoryWindowState?: (callback: (isOpen: boolean) => void) => () => void;
     onHistoryData?: (callback: (transcripts: unknown[]) => void) => () => void;
+    getHistoryDates?: () => Promise<string[]>;
+    getHistoryByDate?: (date: string) => Promise<any[]>;
 
     // Native auxiliary windows
     openApiSettingsWindow?: (draft: ApiSettingsDraft) => void;
@@ -162,6 +170,9 @@ export interface ElectronAPI {
     onApiSettingsUpdated?: (callback: (config: SetupConfig) => void) => () => void;
     openUsageGuideWindow?: () => void;
     closeCurrentWindow?: () => void;
+    
+    // Ollama API
+    fetchOllamaModels?: (endpoint: string, apiKey: string) => Promise<{ok: boolean, models?: {name: string}[], message?: string}>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

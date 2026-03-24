@@ -49,6 +49,9 @@ interface SetupConfig {
     azureSpeechRegion?: string;
     deepgramKey?: string;
     deeplKey?: string;
+    ollamaEndpoint?: string;
+    ollamaApiKey?: string;
+    ollamaModel?: string;
 }
 
 interface ApiKeyValidationStatus {
@@ -68,6 +71,9 @@ interface ApiSettingsDraft {
     azureSpeechRegion: string;
     deepgramKey: string;
     deeplKey: string;
+    ollamaEndpoint: string;
+    ollamaApiKey: string;
+    ollamaModel: string;
 }
 
 interface ApiSettingsSaveResult {
@@ -120,6 +126,9 @@ const VALID_CONFIG_KEYS = new Set([
     'azureSpeechRegion',
     'deepgramKey',
     'deeplKey',
+    'ollamaEndpoint',
+    'ollamaApiKey',
+    'ollamaModel',
 ]);
 
 function isValidConfig(config: unknown) {
@@ -323,6 +332,9 @@ let latestApiSettingsDraft: ApiSettingsDraft = {
     azureSpeechRegion: '',
     deepgramKey: '',
     deeplKey: '',
+    ollamaEndpoint: 'http://127.0.0.1:11434',
+    ollamaApiKey: '',
+    ollamaModel: '',
 };
 let isQuitting = false;
 let isStealthModeMain = false; // Tracks global stealth state for all windows
@@ -338,7 +350,7 @@ const PYTHON_RECOVERY_RETRY_DELAY_MS = 500;
 
 // Environment
 const isDev = !app.isPackaged;
-const VITE_DEV_SERVER_URL = 'http://localhost:5173';
+const VITE_DEV_SERVER_URL = 'http://localhost:5174';
 const ZMQ_HOST = '127.0.0.1';
 const ZMQ_PORT = 5555;
 const ZMQ_COMMAND_PORT = 5556;
@@ -405,6 +417,18 @@ function normalizeSetupConfig(raw: unknown): SetupConfig {
         normalized.deeplKey = value.deeplKey;
     }
 
+    if (typeof value.ollamaEndpoint === 'string') {
+        normalized.ollamaEndpoint = value.ollamaEndpoint;
+    }
+
+    if (typeof value.ollamaApiKey === 'string') {
+        normalized.ollamaApiKey = value.ollamaApiKey;
+    }
+
+    if (typeof value.ollamaModel === 'string') {
+        normalized.ollamaModel = value.ollamaModel;
+    }
+
     return normalized;
 }
 
@@ -443,6 +467,9 @@ function buildApiSettingsDraft(config: SetupConfig): ApiSettingsDraft {
         azureSpeechRegion: (config.azureSpeechRegion ?? '').trim().toLowerCase(),
         deepgramKey: config.deepgramKey ?? '',
         deeplKey: config.deeplKey ?? '',
+        ollamaEndpoint: config.ollamaEndpoint ?? 'http://127.0.0.1:11434',
+        ollamaApiKey: config.ollamaApiKey ?? '',
+        ollamaModel: config.ollamaModel ?? '',
     };
 }
 
@@ -458,12 +485,53 @@ function sanitizeApiSettingsDraft(raw: unknown): ApiSettingsDraft {
             : '',
         deepgramKey: typeof value.deepgramKey === 'string' ? value.deepgramKey : '',
         deeplKey: typeof value.deeplKey === 'string' ? value.deeplKey : '',
+        ollamaEndpoint: typeof value.ollamaEndpoint === 'string' ? value.ollamaEndpoint : 'http://127.0.0.1:11434',
+        ollamaApiKey: typeof value.ollamaApiKey === 'string' ? value.ollamaApiKey : '',
+        ollamaModel: typeof value.ollamaModel === 'string' ? value.ollamaModel : '',
     };
 }
 
 function sendHistoryWindowState(isOpen: boolean) {
     if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('history-window-state', isOpen);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Transcript History Persister
+// ═══════════════════════════════════════════════════════════════════════════════
+const TRANSCRIPTS_DIR = path.join(app.getPath('userData'), 'transcripts');
+if (!fs.existsSync(TRANSCRIPTS_DIR)) {
+    fs.mkdirSync(TRANSCRIPTS_DIR, { recursive: true });
+}
+
+function saveFinalizedTranscript(data: any) {
+    if (!data.isFinal) return;
+    try {
+        const date = new Date();
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const dateStr = `${year}-${month}-${day}`;
+        
+        const filePath = path.join(TRANSCRIPTS_DIR, `${dateStr}.json`);
+        let history: any[] = [];
+        if (fs.existsSync(filePath)) {
+            history = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        }
+        
+        history.push({
+            timestamp: data.timestamp || Date.now(),
+            original: data.original || '',
+            translated: data.translated || '',
+            source: data.source || 'unknown',
+            provider: data.translationProvider || 'unknown',
+            isFinal: true
+        });
+        
+        fs.writeFileSync(filePath, JSON.stringify(history, null, 2));
+    } catch (e) {
+        console.error('[Main] Failed to save transcript to history:', e);
     }
 }
 
@@ -540,6 +608,7 @@ function buildHistoryWindowHtml() {
       border: 1px solid rgba(255,255,255,0.08);
       background: linear-gradient(180deg, rgba(20,20,24,0.96), rgba(10,10,14,0.98));
       overflow: hidden;
+      position: relative;
     }
     .header {
       flex-shrink: 0;
@@ -548,9 +617,18 @@ function buildHistoryWindowHtml() {
       justify-content: space-between;
       padding: 20px 24px;
       border-bottom: 1px solid rgba(255,255,255,0.08);
+      flex-wrap: wrap;
+      gap: 12px;
     }
-    h1 { font-size: 22px; font-weight: 700; color: #fff; }
-    .meta { font-size: 13px; color: rgba(255,255,255,0.55); }
+    h1 { font-size: 20px; font-weight: 700; color: #fff; margin: 0; }
+    .meta { font-size: 13px; color: rgba(255,255,255,0.55); white-space: nowrap; }
+    .controls { display: flex; gap: 8px; align-items: center; }
+    .action-btn { padding: 8px 14px; border: none; border-radius: 8px; color: #fff; cursor: pointer; font-weight: 600; font-size: 13px; transition: opacity 0.2s; }
+    .action-btn:hover { opacity: 0.9; }
+    .action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    select { padding: 7px 12px; border-radius: 8px; background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.2); outline: none; font-size: 13px; cursor: pointer; }
+    select option { background: #1a1a20; color: #fff; }
+    
     #content {
       flex: 1;
       overflow-y: auto;
@@ -568,97 +646,63 @@ function buildHistoryWindowHtml() {
       background: rgba(255,255,255,0.03);
       align-items: flex-start;
     }
-    .entry.is-live {
-      border-color: rgba(167,139,250,0.28);
-      background: rgba(167,139,250,0.08);
-    }
-    .time {
-      color: #a78bfa;
-      font-size: 13px;
-      min-width: 74px;
-      font-variant-numeric: tabular-nums;
-      font-weight: 700;
-      padding-top: 2px;
-    }
+    .entry.is-live { border-color: rgba(167,139,250,0.28); background: rgba(167,139,250,0.08); }
+    .time { color: #a78bfa; font-size: 13px; min-width: 74px; font-variant-numeric: tabular-nums; font-weight: 700; padding-top: 2px; }
     .texts { flex: 1; min-width: 0; }
-    .original {
-      font-size: 14px;
-      color: rgba(255,255,255,0.5);
-      font-style: italic;
-      margin-bottom: 6px;
-      line-height: 1.45;
-      word-break: break-word;
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 8px;
-    }
+    .original { font-size: 14px; color: rgba(255,255,255,0.5); font-style: italic; margin-bottom: 6px; line-height: 1.45; word-break: break-word; display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
     .original-content { flex: 1; }
-    .copy-btn {
-      flex-shrink: 0;
-      width: 20px;
-      height: 20px;
-      padding: 3px;
-      border-radius: 4px;
-      color: rgba(0, 0, 0, 0.3);
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.2s;
-      border: 1px solid transparent;
-      margin-top: -2px;
-    }
-    .copy-btn:hover {
-      background: rgba(255,255,255,0.08);
-      color: rgba(21, 4, 4, 0.8);
-      border-color: rgba(255,255,255,0.1);
-    }
-    .copy-btn.copied {
-      color: #22c55e;
-    }
-    .translated {
-      font-size: 18px;
-      color: #fff;
-      font-weight: 600;
-      line-height: 1.5;
-      word-break: break-word;
-    }
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      margin-left: 10px;
-      padding: 3px 8px;
-      border-radius: 999px;
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      color: #e9d5ff;
-      background: rgba(167,139,250,0.16);
-      border: 1px solid rgba(167,139,250,0.22);
-    }
-    .empty {
-      margin: auto;
-      color: rgba(255,255,255,0.35);
-      text-align: center;
-      font-size: 15px;
-    }
+    .copy-btn { width: 20px; height: 20px; padding: 3px; border-radius: 4px; color: rgba(255, 255, 255, 0.4); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; border: 1px solid transparent; margin-top: -2px; background: transparent; }
+    .copy-btn:hover { background: rgba(255,255,255,0.08); color: rgba(255, 255, 255, 0.9); border-color: rgba(255,255,255,0.1); }
+    .copy-btn.copied { color: #22c55e; }
+    .translated { font-size: 18px; color: #fff; font-weight: 600; line-height: 1.5; word-break: break-word; }
+    .badge { display: inline-flex; align-items: center; justify-content: center; margin-left: 10px; padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #e9d5ff; background: rgba(167,139,250,0.16); border: 1px solid rgba(167,139,250,0.22); }
+    .empty { margin: auto; color: rgba(255,255,255,0.35); text-align: center; font-size: 15px; padding: 40px; }
+    
+    #reportOverlay { display: none; position: absolute; top:0; left:0; right:0; bottom:0; background: rgba(9,9,11,0.98); z-index: 100; flex-direction: column; padding: 20px; }
+    #reportOverlay .report-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 16px;}
+    #reportOverlay textarea { flex: 1; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: #f4f4f5; padding: 16px; font-family: monospace; font-size: 14px; line-height: 1.6; resize: none; outline: none; }
+    #reportOverlay textarea:focus { border-color: rgba(167,139,250,0.5); }
   </style>
 </head>
 <body>
   <div class="shell">
     <div class="header">
       <h1>Transcript History</h1>
-      <div id="meta" class="meta">0 entries</div>
+      <div class="controls">
+        <select id="dateSelect">
+          <option value="current">Current Session</option>
+        </select>
+        <button id="reportBtn" class="action-btn" style="background: #8b5cf6;">Ollama ile Ozetle</button>
+        <div id="meta" class="meta">0 entries</div>
+      </div>
     </div>
+    
     <div id="content"><div class="empty">No transcripts yet.</div></div>
+    
+    <div id="reportOverlay">
+      <div class="report-header">
+        <h2 style="font-size: 18px; margin: 0; color: #fff;">Toplanti Ozeti</h2>
+        <div style="display: flex; gap: 8px;">
+          <button id="saveReportBtn" class="action-btn" style="background: #10b981;">Masustune Kaydet</button>
+          <button id="closeReportBtn" class="action-btn" style="background: rgba(255,255,255,0.1);">Kapat</button>
+        </div>
+      </div>
+      <textarea id="reportText" readonly></textarea>
+    </div>
   </div>
   <script>
     (() => {
       const content = document.getElementById('content');
       const meta = document.getElementById('meta');
+      const dateSelect = document.getElementById('dateSelect');
+      const reportBtn = document.getElementById('reportBtn');
+      const reportOverlay = document.getElementById('reportOverlay');
+      const saveReportBtn = document.getElementById('saveReportBtn');
+      const closeReportBtn = document.getElementById('closeReportBtn');
+      const reportText = document.getElementById('reportText');
+
+      let currentSessionData = [];
+      let loadedData = [];
 
       const escapeHtml = (value) => String(value ?? '')
         .replace(/&/g, '&amp;')
@@ -700,7 +744,7 @@ function buildHistoryWindowHtml() {
         meta.textContent = \`\${list.length} entries\`;
 
         if (!list.length) {
-          content.innerHTML = '<div class="empty">No transcripts yet.</div>';
+          content.innerHTML = '<div class="empty">Bu tarih icin gosterilecek kaydi bulunamadi.</div>';
           return;
         }
 
@@ -723,9 +767,90 @@ function buildHistoryWindowHtml() {
         \`).join('');
       };
 
-      if (window.electronAPI?.onHistoryData) {
-        window.electronAPI.onHistoryData(render);
+      // INIT
+      if (window.electronAPI?.getHistoryDates) {
+        window.electronAPI.getHistoryDates().then(dates => {
+          dates.forEach(d => {
+            const opt = document.createElement('option');
+            opt.value = d;
+            opt.textContent = \`[\${d}] Arşivi\`;
+            dateSelect.appendChild(opt);
+          });
+        });
       }
+
+      dateSelect.addEventListener('change', async (e) => {
+        const val = e.target.value;
+        if (val === 'current') {
+          loadedData = currentSessionData;
+          render(loadedData);
+        } else {
+          if (window.electronAPI?.getHistoryByDate) {
+            const data = await window.electronAPI.getHistoryByDate(val);
+            loadedData = data;
+            render(loadedData);
+          }
+        }
+      });
+
+      if (window.electronAPI?.onHistoryData) {
+        window.electronAPI.onHistoryData((entries) => {
+          currentSessionData = entries;
+          if (dateSelect.value === 'current') {
+            loadedData = currentSessionData;
+            render(loadedData);
+          }
+        });
+      }
+
+      // REPORT
+      reportBtn.addEventListener('click', async () => {
+        if (!loadedData || loadedData.length === 0) {
+          alert("Ozetlenecek kayit bulunamadi!");
+          return;
+        }
+        reportBtn.disabled = true;
+        reportBtn.textContent = 'Ozetleniyor...';
+        try {
+          const res = await window.electronAPI.generateOllamaReport(loadedData);
+          if (res.ok) {
+            reportText.value = res.report;
+            reportOverlay.style.display = 'flex';
+          } else {
+            alert(res.message || 'Rapor olusturulurken hata olustu.');
+          }
+        } catch (e) {
+          alert('Beklenmeyen bir hata olustu.');
+        }
+        reportBtn.disabled = false;
+        reportBtn.textContent = 'Ollama ile Ozetle';
+      });
+
+      closeReportBtn.addEventListener('click', () => {
+        reportOverlay.style.display = 'none';
+      });
+
+      saveReportBtn.addEventListener('click', async () => {
+        const text = reportText.value;
+        if (!text) return;
+        saveReportBtn.disabled = true;
+        saveReportBtn.textContent = 'Kaydediliyor...';
+        
+        try {
+          const res = await window.electronAPI.saveReportToDesktop(text);
+          if (res.ok) {
+            saveReportBtn.textContent = 'Basarili!';
+            setTimeout(() => { saveReportBtn.textContent = 'Masaustune Kaydet'; }, 2000);
+          } else {
+            alert(res.message || 'Kaydedilemedi');
+            saveReportBtn.textContent = 'Masaustune Kaydet';
+          }
+        } catch(e) {
+            saveReportBtn.textContent = 'Masaustune Kaydet';
+        }
+        saveReportBtn.disabled = false;
+      });
+
     })();
   </script>
 </body>
@@ -918,6 +1043,28 @@ function buildApiSettingsWindowHtml() {
         </div>
       </div>
 
+      <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 8px 0;" />
+
+      <div class="field">
+        <label for="ollamaEndpoint">Ollama Endpoint URL</label>
+        <input id="ollamaEndpoint" type="text" placeholder="http://127.0.0.1:11434" />
+      </div>
+
+      <div class="field">
+        <label for="ollamaApiKey">Ollama API Key (Opsiyonel)</label>
+        <input id="ollamaApiKey" type="password" placeholder="Bearer Token (varsa)" />
+      </div>
+
+      <div class="field">
+        <label for="ollamaModel">Ollama Model</label>
+        <div style="display: flex; gap: 8px;">
+          <select id="ollamaModel" style="flex: 1; padding: 14px 15px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.05); color: #fff; font-size: 15px; outline: none;">
+            <option value="">Seciniz</option>
+          </select>
+          <button id="fetchModelsBtn" class="btn secondary" style="min-width: 130px;">Modelleri Getir</button>
+        </div>
+      </div>
+
       <div id="status" class="status"></div>
     </div>
     <div class="footer">
@@ -932,7 +1079,11 @@ function buildApiSettingsWindowHtml() {
         azureSpeechRegion: document.getElementById('azureSpeechRegion'),
         deepgramKey: document.getElementById('deepgramKey'),
         deeplKey: document.getElementById('deeplKey'),
+        ollamaEndpoint: document.getElementById('ollamaEndpoint'),
+        ollamaApiKey: document.getElementById('ollamaApiKey'),
+        ollamaModel: document.getElementById('ollamaModel'),
       };
+      const fetchModelsBtn = document.getElementById('fetchModelsBtn');
       const status = document.getElementById('status');
       const saveButton = document.getElementById('save');
       const cancelButton = document.getElementById('cancel');
@@ -946,6 +1097,7 @@ function buildApiSettingsWindowHtml() {
         Object.values(fields).forEach((input) => {
           input.disabled = saving;
         });
+        fetchModelsBtn.disabled = saving;
       };
 
       const setStatus = (tone, message) => {
@@ -989,10 +1141,47 @@ function buildApiSettingsWindowHtml() {
           fields.azureSpeechRegion.value = data.azureSpeechRegion || '';
           fields.deepgramKey.value = data.deepgramKey || '';
           fields.deeplKey.value = data.deeplKey || '';
+          fields.ollamaEndpoint.value = data.ollamaEndpoint || 'http://127.0.0.1:11434';
+          fields.ollamaApiKey.value = data.ollamaApiKey || '';
+          
+          if (data.ollamaModel) {
+            fields.ollamaModel.innerHTML = '<option value="">Seciniz</option>';
+            const opt = document.createElement('option');
+            opt.value = data.ollamaModel;
+            opt.textContent = data.ollamaModel;
+            opt.selected = true;
+            fields.ollamaModel.appendChild(opt);
+          }
+
           setStatus('idle', '');
           setSaving(false);
         });
       }
+      
+      fetchModelsBtn.addEventListener('click', async () => {
+        if (!window.electronAPI?.fetchOllamaModels) return;
+        fetchModelsBtn.disabled = true;
+        fetchModelsBtn.textContent = 'Getiriliyor...';
+        try {
+          const res = await window.electronAPI.fetchOllamaModels(fields.ollamaEndpoint.value, fields.ollamaApiKey.value);
+          if (res.ok && res.models) {
+            fields.ollamaModel.innerHTML = '<option value="">Seciniz</option>';
+            res.models.forEach(m => {
+              const opt = document.createElement('option');
+              opt.value = m.name;
+              opt.textContent = m.name;
+              fields.ollamaModel.appendChild(opt);
+            });
+            setStatus('success', 'Modeller ba\u015Farıyla getirildi. L\u00FCtfen se\u00E7im yap\u0131n.');
+          } else {
+            setStatus('error', res.message || 'Model getirme ba\u015Farisiz oldu.');
+          }
+        } catch (e) {
+          setStatus('error', 'Modeller getirilirken hata olu\u015Ftu.');
+        }
+        fetchModelsBtn.disabled = false;
+        fetchModelsBtn.textContent = 'Modelleri Getir';
+      });
 
       saveButton.addEventListener('click', async () => {
         if (!window.electronAPI?.saveApiSettingsWindow) {
@@ -1009,6 +1198,9 @@ function buildApiSettingsWindowHtml() {
             azureSpeechRegion: fields.azureSpeechRegion.value,
             deepgramKey: fields.deepgramKey.value,
             deeplKey: fields.deeplKey.value,
+            ollamaEndpoint: fields.ollamaEndpoint.value,
+            ollamaApiKey: fields.ollamaApiKey.value,
+            ollamaModel: fields.ollamaModel.value,
           });
 
           setStatus(result.ok ? 'success' : 'error', result.message);
@@ -1244,6 +1436,9 @@ async function saveApiSettingsDraft(draft: unknown): Promise<ApiSettingsSaveResu
         azureSpeechRegion: sanitized.azureSpeechRegion.trim().toLowerCase(),
         deepgramKey: sanitized.deepgramKey.trim(),
         deeplKey: sanitized.deeplKey.trim(),
+        ollamaEndpoint: sanitized.ollamaEndpoint?.trim(),
+        ollamaApiKey: sanitized.ollamaApiKey?.trim(),
+        ollamaModel: sanitized.ollamaModel?.trim(),
         engineType: nextEngineType,
     };
 
@@ -1379,6 +1574,7 @@ function startPythonEngine(): ChildProcess | null {
                             // Send to renderer
                             if (mainWindow && !mainWindow.isDestroyed()) {
                                 mainWindow.webContents.send('transcript-update', transcriptData);
+                                saveFinalizedTranscript(transcriptData);
                                 // console.log('[Main] Sent transcript to renderer:', transcriptData.translated);
                             }
                         }
@@ -1460,6 +1656,7 @@ async function startZmqSubscriber(): Promise<void> {
                         } else {
                             // Transcript update
                             mainWindow.webContents.send('transcript-update', data);
+                            saveFinalizedTranscript(data);
                         }
                     }
                 } catch (parseError) {
@@ -1815,6 +2012,27 @@ function setupIpcHandlers(): void {
         };
     });
 
+    ipcMain.handle('fetch-ollama-models', async (_event, endpoint: string, apiKey: string) => {
+        try {
+            const baseUrl = (endpoint || 'http://127.0.0.1:11434').replace(/\/$/, '');
+            const headers: Record<string, string> = {};
+            if (apiKey?.trim()) {
+                headers['Authorization'] = `Bearer ${apiKey.trim()}`;
+            }
+            const response = await fetchWithTimeout(`${baseUrl}/api/tags`, {
+                headers
+            }, 5000);
+            
+            if (!response.ok) {
+                return { ok: false, message: `Ollama hatasi: ${response.status} ${response.statusText}` };
+            }
+            const data: any = await response.json();
+            return { ok: true, models: data.models || [] };
+        } catch (error) {
+            return { ok: false, message: `Baglanti hatasi: ${error instanceof Error ? error.message : 'Bilinmeyen hata'}` };
+        }
+    });
+
     ipcMain.handle('check-blackhole', async () => {
         try {
             console.log('[Main] Checking for BlackHole audio driver...');
@@ -1837,6 +2055,81 @@ function setupIpcHandlers(): void {
             });
         } else {
             console.warn('[Main] Blocked unsafe external URL:', url);
+        }
+    });
+
+    ipcMain.handle('get-history-dates', async () => {
+        try {
+            if (!fs.existsSync(TRANSCRIPTS_DIR)) return [];
+            const files = fs.readdirSync(TRANSCRIPTS_DIR);
+            return files.filter(f => f.endsWith('.json')).map(f => f.substring(0, f.length - 5)).sort().reverse();
+        } catch { return []; }
+    });
+
+    ipcMain.handle('get-history-by-date', async (_event, dateStr: string) => {
+        try {
+            const filePath = path.join(TRANSCRIPTS_DIR, `${dateStr}.json`);
+            if (fs.existsSync(filePath)) {
+                return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+            }
+        } catch {}
+        return [];
+    });
+
+    ipcMain.handle('generate-ollama-report', async (_event, transcripts) => {
+        try {
+            const config = readSetupConfig();
+            if (!config.ollamaEndpoint || !config.ollamaModel) {
+                return { ok: false, message: 'Ollama URL veya Model secilmedi. Lutfen API Ayarlarini kontrol edin.' };
+            }
+            const baseUrl = config.ollamaEndpoint.replace(/\/$/, '');
+            const headers: Record<string, string> = { "Content-Type": "application/json" };
+            if (config.ollamaApiKey?.trim()) {
+                headers['Authorization'] = `Bearer ${config.ollamaApiKey.trim()}`;
+            }
+
+            let fullText = transcripts.map((t: any) => `[${new Date(t.timestamp).toLocaleTimeString()}] ${t.original || t.translated}`).join('\n');
+            const prompt = `Sen profesyonel bir yazılım toplantısı asistanısın. Aşağıdaki toplantı dökümünü incele. Toplantının amacını, konuşulan ana konuları, alınan kararları ve Doğan'ın (veya genel olarak ekibin) yapması gereken görevleri (Action Items) maddeler halinde Türkçe özetle.\n\nToplantı Dökümü:\n${fullText}`;
+
+            const response = await fetchWithTimeout(`${baseUrl}/api/chat`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({
+                    model: config.ollamaModel,
+                    messages: [{ role: 'user', content: prompt }],
+                    stream: false
+                })
+            }, 120000); // 120s timeout for large models
+
+            if (!response.ok) {
+                return { ok: false, message: `Ollama Hatasi: ${response.status} ${response.statusText}` };
+            }
+            
+            const data: any = await response.json();
+            return { ok: true, report: data.message?.content || '' };
+        } catch (e: any) {
+            return { ok: false, message: e.message };
+        }
+    });
+
+    ipcMain.handle('save-report-to-desktop', async (_event, reportText) => {
+        try {
+            const { dialog } = await import('electron');
+            const dateStr = new Date().toISOString().split('T')[0];
+            const defaultPath = path.join(app.getPath('desktop'), `Toplanti_Ozeti_${dateStr}.md`);
+            
+            const result = await dialog.showSaveDialog({
+                defaultPath,
+                filters: [{ name: 'Markdown', extensions: ['md'] }, { name: 'Text', extensions: ['txt'] }]
+            });
+
+            if (!result.canceled && result.filePath) {
+                fs.writeFileSync(result.filePath, reportText, 'utf8');
+                return { ok: true };
+            }
+            return { ok: false, message: 'Iptal edildi' };
+        } catch (e: any) {
+            return { ok: false, message: e.message };
         }
     });
 

@@ -359,12 +359,24 @@ function App() {
     }, [rawLiveSubtitle]);
 
     // ─── Handlers ────────────────────────────────────────────────────────────
-    const openApiSettingsWindow = useCallback(() => {
+    const openApiSettingsWindow = useCallback(async () => {
+        let currentConfig: SetupConfig | undefined;
+        try {
+            if (window.electronAPI?.getConfig) {
+                currentConfig = await window.electronAPI.getConfig();
+            }
+        } catch (e) {
+            console.warn("Failed to fetch latest config for draft", e);
+        }
+
         const draft: ApiSettingsDraft = {
             azureSpeechKey,
             azureSpeechRegion,
             deepgramKey,
             deeplKey,
+            ollamaEndpoint: currentConfig?.ollamaEndpoint ?? 'http://127.0.0.1:11434',
+            ollamaApiKey: currentConfig?.ollamaApiKey ?? '',
+            ollamaModel: currentConfig?.ollamaModel ?? '',
         };
 
         window.electronAPI?.openApiSettingsWindow?.(draft);
