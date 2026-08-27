@@ -1,13 +1,12 @@
+import os
 import sys
 import unittest
-import os
 from pathlib import Path
-
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 from azure_translation_engine import AzureSpeechTranslationClient
-from engine import SubtitleEngine, EngineConfig, apply_runtime_env_overrides
+from engine import EngineConfig, SubtitleEngine, apply_runtime_env_overrides
 
 
 class DummyCloudClient:

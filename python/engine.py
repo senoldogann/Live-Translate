@@ -18,19 +18,19 @@ Gereksinimler:
 - Apple Silicon için optimize edilmiş (M1/M2/M3)
 """
 
-import sys
-import time
 import json
-import signal
-import threading
 import os
 import re
+import signal
+import sys
+import threading
+import time
 import warnings
-import requests
-from typing import Optional, Callable
-from dataclasses import dataclass, asdict
-from collections import deque
+from collections.abc import Callable
+from dataclasses import asdict, dataclass
 from pathlib import Path
+
+import requests
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -38,12 +38,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / ".env")
 
 import numpy as np
-import sounddevice as sd
 import zmq
-import torch
-from faster_whisper import WhisperModel
-import argostranslate.package
-import argostranslate.translate
 from deep_translator import GoogleTranslator
 
 # Lazy imports for faster startup
@@ -83,7 +78,7 @@ class EngineConfig:
     zmq_address: str = "tcp://127.0.0.1:5555"
 
     # Audio device
-    audio_device: Optional[str] = "BlackHole 2ch"  # None for default
+    audio_device: str | None = "BlackHole 2ch"  # None for default
 
     # Streaming setting
     streaming_mode: bool = False
@@ -96,7 +91,7 @@ class EngineConfig:
 CONFIG = EngineConfig()
 
 
-def _parse_bool_env(value: Optional[str]) -> Optional[bool]:
+def _parse_bool_env(value: str | None) -> bool | None:
     if value is None:
         return None
 
@@ -158,9 +153,7 @@ class VoiceActivityDetector:
     Falls back to energy-based detection if webrtcvad is unavailable.
     """
 
-    def __init__(
-        self, mode: int = 3, sample_rate: int = 16000, frame_duration: int = 30
-    ):
+    def __init__(self, mode: int = 3, sample_rate: int = 16000, frame_duration: int = 30):
         self.mode = mode
         self.sample_rate = sample_rate
         self.frame_duration = frame_duration
@@ -210,9 +203,7 @@ class VoiceActivityDetector:
             print(f"[VAD] Error: {e}, falling back to energy detection")
             return self._energy_based_detection(audio_chunk)
 
-    def _energy_based_detection(
-        self, audio_chunk: np.ndarray, threshold: float = 0.01
-    ) -> bool:
+    def _energy_based_detection(self, audio_chunk: np.ndarray, threshold: float = 0.01) -> bool:
         """Simple energy-based voice detection fallback"""
         rms = np.sqrt(np.mean(audio_chunk**2))
         return rms > threshold
@@ -231,11 +222,11 @@ class AudioCapture:
 
     def __init__(
         self,
-        device_name: Optional[str] = None,
+        device_name: str | None = None,
         sample_rate: int = 16000,
         channels: int = 1,
         chunk_duration: float = 0.5,
-        callback: Optional[Callable[[np.ndarray], None]] = None,
+        callback: Callable[[np.ndarray], None] | None = None,
     ):
         self.device_name = device_name
         self.sample_rate = sample_rate
@@ -251,14 +242,12 @@ class AudioCapture:
 
             self.sd = sd
         except ImportError:
-            raise RuntimeError(
-                "sounddevice is required. Install with: pip install sounddevice"
-            )
+            raise RuntimeError("sounddevice is required. Install with: pip install sounddevice")
 
         # Find device
         self.device_id = self._find_device()
 
-    def _find_device(self) -> Optional[int]:
+    def _find_device(self) -> int | None:
         """Find the audio device by name"""
         if self.device_name is None:
             return None  # Use default
@@ -304,9 +293,7 @@ class AudioCapture:
                 dtype=np.float32,
             )
             self.stream.start()
-            print(
-                f"[Audio] Capture started (device={self.device_id}, rate={self.sample_rate})"
-            )
+            print(f"[Audio] Capture started (device={self.device_id}, rate={self.sample_rate})")
         except Exception as e:
             print(f"[Audio] Failed to start capture: {e}")
             self._running = False
@@ -356,9 +343,7 @@ class TranscriptionEngine:
         if self.model is not None:
             return
 
-        print(
-            f"[Whisper] Loading model '{self.model_name}' (device={self.device}, compute={self.compute_type})..."
-        )
+        print(f"[Whisper] Loading model '{self.model_name}' (device={self.device}, compute={self.compute_type})...")
         start_time = time.time()
 
         try:
@@ -375,16 +360,12 @@ class TranscriptionEngine:
             print(f"[Whisper] Model loaded in {elapsed:.2f}s")
 
         except ImportError:
-            raise RuntimeError(
-                "faster-whisper is required. Install with: pip install faster-whisper"
-            )
+            raise RuntimeError("faster-whisper is required. Install with: pip install faster-whisper")
         except Exception as e:
             print(f"[Whisper] Failed to load model: {e}")
             raise
 
-    def transcribe(
-        self, audio: np.ndarray, sample_rate: int = 16000, prompt: str = ""
-    ) -> tuple[str, float, str]:
+    def transcribe(self, audio: np.ndarray, sample_rate: int = 16000, prompt: str = "") -> tuple[str, float, str]:
         """
         Transcribe audio to text with language detection.
         Returns (text, confidence, detected_language)
@@ -435,9 +416,7 @@ class TranscriptionEngine:
                         # Repetition detected!
                         text = " ".join(words[:-3])
 
-            avg_confidence = (
-                (total_confidence / segment_count) if segment_count > 0 else 0.0
-            )
+            avg_confidence = (total_confidence / segment_count) if segment_count > 0 else 0.0
 
             return text, avg_confidence, detected_lang
 
@@ -461,11 +440,7 @@ class DeepLTranslator:
         self.api_key = os.getenv("DEEPL_API_KEY", "")
         self._session = requests.Session()
         # Detect Free vs Pro based on key suffix
-        self.base_url = (
-            "https://api-free.deepl.com"
-            if self.api_key.endswith(":fx")
-            else "https://api.deepl.com"
-        )
+        self.base_url = "https://api-free.deepl.com" if self.api_key.endswith(":fx") else "https://api.deepl.com"
         # DeepL uses uppercase language codes
         self.source_lang = source_lang.upper()
         self.target_lang = target_lang.upper()
@@ -480,8 +455,8 @@ class DeepLTranslator:
         self,
         text: str,
         context: str = "",
-        model_type: Optional[str] = None,
-    ) -> Optional[str]:
+        model_type: str | None = None,
+    ) -> str | None:
         """Translate text using DeepL API. Returns None on failure."""
         if not self._available or not text.strip():
             return None
@@ -530,9 +505,7 @@ class DeepLTranslator:
                     )
                     response.raise_for_status()
                     result = response.json()["translations"][0]["text"]
-                    print(
-                        f"[DeepL] Fallback translated: '{text[:30]}...' -> '{result[:30]}...'"
-                    )
+                    print(f"[DeepL] Fallback translated: '{text[:30]}...' -> '{result[:30]}...'")
                     return result
                 except Exception:
                     pass
@@ -544,13 +517,9 @@ class DeepLTranslator:
         if not new_key or new_key == self.api_key:
             return
 
-        print(f"[DeepL] API anahtarı güncelleniyor...")
+        print("[DeepL] API anahtarı güncelleniyor...")
         self.api_key = new_key
-        self.base_url = (
-            "https://api-free.deepl.com"
-            if self.api_key.endswith(":fx")
-            else "https://api.deepl.com"
-        )
+        self.base_url = "https://api-free.deepl.com" if self.api_key.endswith(":fx") else "https://api.deepl.com"
         self._available = True
 
 
@@ -577,12 +546,8 @@ class TranslationEngine:
         self._protected_terms = self._build_protected_terms(source_lang)
 
         # Initialize translators
-        self.deepl_translator = DeepLTranslator(
-            source_lang=source_lang, target_lang=target_lang
-        )
-        self.google_translator = GoogleTranslator(
-            source=source_lang, target=target_lang
-        )
+        self.deepl_translator = DeepLTranslator(source_lang=source_lang, target_lang=target_lang)
+        self.google_translator = GoogleTranslator(source=source_lang, target=target_lang)
 
     def load(self):
         """Load translation models"""
@@ -593,9 +558,7 @@ class TranslationEngine:
             if self._installed:
                 return
 
-            print(
-                f"[Translate] Initializing Hybrid Engine {self.source_lang} -> {self.target_lang}..."
-            )
+            print(f"[Translate] Initializing Hybrid Engine {self.source_lang} -> {self.target_lang}...")
 
             # Load Offline Model (Argos) as Last Resort Backup
             try:
@@ -606,28 +569,18 @@ class TranslationEngine:
                 available_packages = argostranslate.package.get_available_packages()
                 package_to_install = next(
                     filter(
-                        lambda x: x.from_code == self.source_lang
-                        and x.to_code == self.target_lang,
+                        lambda x: x.from_code == self.source_lang and x.to_code == self.target_lang,
                         available_packages,
                     ),
                     None,
                 )
 
                 if package_to_install:
-                    if (
-                        package_to_install
-                        not in argostranslate.package.get_installed_packages()
-                    ):
-                        print(
-                            f"[Translate] Installing offline package: {package_to_install}"
-                        )
-                        argostranslate.package.install_from_path(
-                            package_to_install.download()
-                        )
+                    if package_to_install not in argostranslate.package.get_installed_packages():
+                        print(f"[Translate] Installing offline package: {package_to_install}")
+                        argostranslate.package.install_from_path(package_to_install.download())
 
-                    installed_languages = (
-                        argostranslate.translate.get_installed_languages()
-                    )
+                    installed_languages = argostranslate.translate.get_installed_languages()
                     source = next(
                         (l for l in installed_languages if l.code == self.source_lang),
                         None,
@@ -639,13 +592,9 @@ class TranslationEngine:
 
                     if source and target:
                         self.translator = source.get_translation(target)
-                        print(
-                            f"[Translate] Argos Offline Loaded: {source.name} -> {target.name}"
-                        )
+                        print(f"[Translate] Argos Offline Loaded: {source.name} -> {target.name}")
                 else:
-                    print(
-                        "[Translate] Argos package not available for this language pair."
-                    )
+                    print("[Translate] Argos package not available for this language pair.")
 
             except Exception as e:
                 print(f"[Translate] Argos setup failed: {e}")
@@ -713,7 +662,7 @@ class TranslationEngine:
     def _protect_terms(
         self,
         text: str,
-        replacements: Optional[dict[str, str]] = None,
+        replacements: dict[str, str] | None = None,
         next_index: int = 0,
     ) -> tuple[str, dict[str, str], int]:
         if not text.strip():
@@ -749,7 +698,7 @@ class TranslationEngine:
         )
         return protected_text, protected_context, replacements
 
-    def _restore_terms(self, text: Optional[str], replacements: dict[str, str]) -> Optional[str]:
+    def _restore_terms(self, text: str | None, replacements: dict[str, str]) -> str | None:
         if text is None:
             return None
 
@@ -793,11 +742,7 @@ class TranslationEngine:
             result = self.deepl_translator.translate(
                 protected_text,
                 context=protected_context,
-                model_type=(
-                    "prefer_quality_optimized"
-                    if prefer_quality
-                    else "latency_optimized"
-                ),
+                model_type=("prefer_quality_optimized" if prefer_quality else "latency_optimized"),
             )
             if result:
                 result = self._restore_terms(result, replacements)
@@ -807,21 +752,20 @@ class TranslationEngine:
                     self.last_provider = "deepl"
                     return result
                 else:
-                    print(f"[DeepL] Same text returned, falling back to Google...")
+                    print("[DeepL] Same text returned, falling back to Google...")
         else:
-            print(f"[DeepL] Skipping for Finnish (source='fi')")
+            print("[DeepL] Skipping for Finnish (source='fi')")
 
         # 2. Try Google Translate (Fallback)
         try:
             result = self.google_translator.translate(protected_text)
             if result:
                 result = self._restore_terms(result, replacements)
-                print(f"[Google] Translated successfully")
+                print("[Google] Translated successfully")
                 self.last_provider = "google"
                 return result
         except Exception as e:
             print(f"[Google] Error: {e}")
-            pass
 
         # 3. Fallback to Argos (Offline)
         if not self._installed:
@@ -846,18 +790,12 @@ class TranslationEngine:
         if new_source_lang == self.source_lang:
             return
 
-        print(
-            f"[Translate] Updating source language: {self.source_lang} -> {new_source_lang}"
-        )
+        print(f"[Translate] Updating source language: {self.source_lang} -> {new_source_lang}")
         self.source_lang = new_source_lang
 
         # Reinitialize translators with new source language
-        self.deepl_translator = DeepLTranslator(
-            source_lang=new_source_lang, target_lang=self.target_lang
-        )
-        self.google_translator = GoogleTranslator(
-            source=new_source_lang, target=self.target_lang
-        )
+        self.deepl_translator = DeepLTranslator(source_lang=new_source_lang, target_lang=self.target_lang)
+        self.google_translator = GoogleTranslator(source=new_source_lang, target=self.target_lang)
         self._protected_terms = self._build_protected_terms(new_source_lang)
         self.translator = None
         self._installed = False
@@ -898,7 +836,7 @@ class ZmqPublisher:
             self.socket = None
         except Exception as e:
             print(f"[ZMQ] Critical Error - Failed to start: {e}")
-            print(f"[ZMQ] Please check if another instance of the app is running.")
+            print("[ZMQ] Please check if another instance of the app is running.")
             sys.exit(1)  # Fail fast to prevent zombie process
             self.socket = None
 
@@ -988,9 +926,7 @@ class SubtitleEngine:
             language=config.whisper_language,
         )
 
-        self.translator = TranslationEngine(
-            source_lang=config.source_lang, target_lang=config.target_lang
-        )
+        self.translator = TranslationEngine(source_lang=config.source_lang, target_lang=config.target_lang)
 
         self.publisher = ZmqPublisher(address=config.zmq_address)
         self._deepgram.publisher = self.publisher
@@ -1000,11 +936,11 @@ class SubtitleEngine:
         self._azure_speech.streaming_mode = config.streaming_mode
 
         # Processing thread
-        self._process_thread: Optional[threading.Thread] = None
+        self._process_thread: threading.Thread | None = None
         self._process_event = threading.Event()
 
         # Command Listener (Config updates)
-        self._command_thread: Optional[threading.Thread] = None
+        self._command_thread: threading.Thread | None = None
         self._command_context = zmq.Context()
         self._command_socket = self._command_context.socket(zmq.SUB)
         # Note: Electron Binds to 5556, we Connect to it.
@@ -1015,7 +951,7 @@ class SubtitleEngine:
         self._last_audio_level_time = 0.0
         self._audio_level_interval = 1.0 / 30.0  # 30 FPS visualizer
 
-    def _select_cloud_backend_name(self) -> Optional[str]:
+    def _select_cloud_backend_name(self) -> str | None:
         if self._azure_speech.has_credentials():
             return "azure"
         if self._deepgram.has_credentials():
@@ -1041,13 +977,8 @@ class SubtitleEngine:
         if backend == "azure":
             self._deepgram.stop()
             self._azure_speech.start(self.config.source_lang)
-            if (
-                not getattr(self._azure_speech, "_running", False)
-                and self._deepgram.has_credentials()
-            ):
-                print(
-                    "[Cloud] Azure unavailable, falling back to Deepgram for this session."
-                )
+            if not getattr(self._azure_speech, "_running", False) and self._deepgram.has_credentials():
+                print("[Cloud] Azure unavailable, falling back to Deepgram for this session.")
                 self._deepgram.start(self.config.source_lang)
             return
 
@@ -1056,9 +987,7 @@ class SubtitleEngine:
             self._deepgram.start(self.config.source_lang)
             return
 
-        print(
-            "[Cloud] WARNING: No Azure Speech or Deepgram credentials configured — cloud engine disabled."
-        )
+        print("[Cloud] WARNING: No Azure Speech or Deepgram credentials configured — cloud engine disabled.")
 
     def _stop_cloud_engine(self):
         self._azure_speech.stop()
@@ -1154,15 +1083,12 @@ class SubtitleEngine:
                             if key == "streaming_mode":
                                 self.config.streaming_mode = bool(value)
                                 self._deepgram.streaming_mode = self.config.streaming_mode
-                                self._azure_speech.streaming_mode = (
-                                    self.config.streaming_mode
-                                )
+                                self._azure_speech.streaming_mode = self.config.streaming_mode
                             elif key == "is_listening":
                                 enabled = (
                                     value
                                     if isinstance(value, bool)
-                                    else str(value).strip().lower()
-                                    in {"1", "true", "yes", "on"}
+                                    else str(value).strip().lower() in {"1", "true", "yes", "on"}
                                 )
                                 if self.config.is_listening != enabled:
                                     self.config.is_listening = enabled
@@ -1181,10 +1107,7 @@ class SubtitleEngine:
                                 if hasattr(self, "translator") and self.translator:
                                     self.translator.update_source_lang(str(value))
                                 # Restart Deepgram with new language if cloud engine is active
-                                if (
-                                    self.config.engine_type == "cloud"
-                                    and self._get_active_cloud_client() is not None
-                                ):
+                                if self.config.engine_type == "cloud" and self._get_active_cloud_client() is not None:
                                     self._start_cloud_engine()
                             elif key == "engine_type":
                                 next_engine_type = str(value)
@@ -1212,15 +1135,11 @@ class SubtitleEngine:
                             if azure_key is not None or azure_region is not None:
                                 self._azure_speech.update_credentials(
                                     None if azure_key is None else str(azure_key),
-                                    None
-                                    if azure_region is None
-                                    else str(azure_region),
+                                    None if azure_region is None else str(azure_region),
                                 )
                             if dl_key:
                                 if hasattr(self.translator, "deepl_translator"):
-                                    self.translator.deepl_translator.update_api_key(
-                                        dl_key
-                                    )
+                                    self.translator.deepl_translator.update_api_key(dl_key)
                             if self.config.engine_type == "cloud":
                                 self._start_cloud_engine()
                         elif data.get("type") == "shutdown":
@@ -1269,9 +1188,7 @@ class SubtitleEngine:
 
             # Determine Interval based on Streaming Mode
             # Streaming mode still needs throttling or the CPU cost jumps sharply.
-            interval = (
-                0.2 if self.config.streaming_mode else self._min_transcript_interval
-            )
+            interval = 0.2 if self.config.streaming_mode else self._min_transcript_interval
 
             # Rate limiting
             if now - self._last_transcript_time < interval:
@@ -1390,7 +1307,7 @@ class SubtitleEngine:
             else:
                 last_partial_text = text
 
-    def start(self, model_size: Optional[str] = None):
+    def start(self, model_size: str | None = None):
         """Start the audio capture and processing loop"""
         if self._running:
             return
@@ -1399,7 +1316,7 @@ class SubtitleEngine:
         self._running = True
 
         # Load AI Models
-        print(f"[Engine] Loading AI models (this may take a moment)...")
+        print("[Engine] Loading AI models (this may take a moment)...")
 
         if self.config.engine_type == "local":
             selected_model = model_size or self.config.whisper_model

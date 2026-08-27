@@ -95,9 +95,7 @@ class DeepgramBufferingTests(unittest.TestCase):
             if len(publisher.messages) >= expected_count:
                 return
             time.sleep(0.01)
-        self.fail(
-            f"Timed out waiting for {expected_count} messages, got {len(publisher.messages)}"
-        )
+        self.fail(f"Timed out waiting for {expected_count} messages, got {len(publisher.messages)}")
 
     def test_streaming_mode_ignores_interims_and_previews_finalized_segments(self):
         client, publisher, translator = self.start_client(streaming_mode=True)
@@ -106,29 +104,19 @@ class DeepgramBufferingTests(unittest.TestCase):
             time.sleep(0.05)
             self.assertEqual(publisher.messages, [])
 
-            client._on_message(
-                FakeResultsMessage(
-                    "Hello everyone", is_final=True, speech_final=False
-                )
-            )
+            client._on_message(FakeResultsMessage("Hello everyone", is_final=True, speech_final=False))
             self.wait_for_messages(publisher, 1)
 
             self.assertFalse(publisher.messages[0]["isFinal"])
             self.assertEqual(publisher.messages[0]["original"], "Hello everyone")
-            self.assertEqual(
-                publisher.messages[0]["translated"], "PREVIEW:Hello everyone"
-            )
+            self.assertEqual(publisher.messages[0]["translated"], "PREVIEW:Hello everyone")
             self.assertFalse(translator.calls[0]["prefer_quality"])
 
-            client._on_message(
-                FakeResultsMessage("Welcome back", is_final=True, speech_final=True)
-            )
+            client._on_message(FakeResultsMessage("Welcome back", is_final=True, speech_final=True))
             self.wait_for_messages(publisher, 2)
 
             self.assertTrue(publisher.messages[1]["isFinal"])
-            self.assertEqual(
-                publisher.messages[1]["original"], "Hello everyone Welcome back"
-            )
+            self.assertEqual(publisher.messages[1]["original"], "Hello everyone Welcome back")
             self.assertEqual(
                 publisher.messages[1]["translated"],
                 "FINAL:Hello everyone Welcome back",
@@ -140,9 +128,7 @@ class DeepgramBufferingTests(unittest.TestCase):
     def test_stable_mode_waits_for_utterance_end_and_uses_context(self):
         client, publisher, translator = self.start_client(streaming_mode=False)
         try:
-            client._on_message(
-                FakeResultsMessage("First sentence", is_final=True, speech_final=False)
-            )
+            client._on_message(FakeResultsMessage("First sentence", is_final=True, speech_final=False))
             time.sleep(0.05)
             self.assertEqual(publisher.messages, [])
 
@@ -152,11 +138,7 @@ class DeepgramBufferingTests(unittest.TestCase):
             self.assertEqual(publisher.messages[0]["original"], "First sentence")
             self.assertEqual(translator.calls[0]["context"], "")
 
-            client._on_message(
-                FakeResultsMessage(
-                    "Second sentence", is_final=True, speech_final=False
-                )
-            )
+            client._on_message(FakeResultsMessage("Second sentence", is_final=True, speech_final=False))
             client._on_message(FakeUtteranceEndMessage())
             self.wait_for_messages(publisher, 2)
 

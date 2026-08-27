@@ -1,5 +1,6 @@
-from engine import SubtitleEngine, EngineConfig
 import time
+
+from engine import EngineConfig, SubtitleEngine
 
 config = EngineConfig(engine_type="cloud")
 e = SubtitleEngine(config)

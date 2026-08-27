@@ -13,12 +13,11 @@ segments into stable Turkish output. This client now:
 """
 
 import os
-import time
 import threading
+import time
 from collections import deque
 from dataclasses import dataclass
 from queue import Empty, Queue
-from typing import Optional
 
 from deepgram import DeepgramClient
 from deepgram.core.events import EventType
@@ -49,13 +48,13 @@ class DeepgramWSClient:
         self.streaming_mode: bool = False
 
         self._running: bool = False
-        self._client: Optional[DeepgramClient] = None
+        self._client: DeepgramClient | None = None
         # Protected by _conn_lock; written from daemon thread, read from audio thread
         self._connection = None
         self._conn_lock = threading.Lock()
-        self._listen_thread: Optional[threading.Thread] = None
-        self._keepalive_thread: Optional[threading.Thread] = None
-        self._translation_thread: Optional[threading.Thread] = None
+        self._listen_thread: threading.Thread | None = None
+        self._keepalive_thread: threading.Thread | None = None
+        self._translation_thread: threading.Thread | None = None
         self._keepalive_interval_s: float = 3.0
         self._last_audio_sent_at: float = 0.0
 
@@ -67,7 +66,7 @@ class DeepgramWSClient:
         self._last_final_source: str = ""
 
         # Async translation queue (prevents websocket callback stalls)
-        self._translation_queue: Queue[Optional[TranslationJob]] = Queue()
+        self._translation_queue: Queue[TranslationJob | None] = Queue()
         self._job_counter = 0
         self._latest_preview_job_id = -1
         self._latest_final_job_id = -1
@@ -109,17 +108,13 @@ class DeepgramWSClient:
         """Open a new WebSocket connection to Deepgram."""
         if self._running:
             if self.source_lang != language:
-                print(
-                    f"[Deepgram] Language changed ({self.source_lang} -> {language}), restarting..."
-                )
+                print(f"[Deepgram] Language changed ({self.source_lang} -> {language}), restarting...")
                 self.stop()
             else:
                 return  # Already running with the same language
 
         if not self.api_key:
-            print(
-                "[Deepgram] WARNING: DEEPGRAM_API_KEY is not set — cloud engine disabled."
-            )
+            print("[Deepgram] WARNING: DEEPGRAM_API_KEY is not set — cloud engine disabled.")
             return
 
         self.source_lang = language
@@ -132,9 +127,7 @@ class DeepgramWSClient:
         self._latest_final_job_id = -1
         self._reset_utterance_state(clear_context=False)
 
-        print(
-            f"[Deepgram] Starting SDK v6 (model=nova-3, language={self.source_lang})..."
-        )
+        print(f"[Deepgram] Starting SDK v6 (model=nova-3, language={self.source_lang})...")
 
         self._translation_thread = threading.Thread(
             target=self._translation_loop,
@@ -243,7 +236,7 @@ class DeepgramWSClient:
             if clear_context:
                 self._recent_context.clear()
 
-    def _get_keyterms(self) -> Optional[list[str]]:
+    def _get_keyterms(self) -> list[str] | None:
         env_value = os.getenv("DEEPGRAM_KEYTERMS", "").strip()
         if env_value:
             terms = [term.strip() for term in env_value.split(",") if term.strip()]
@@ -306,10 +299,7 @@ class DeepgramWSClient:
             if not self._running:
                 return
 
-            if (
-                time.monotonic() - self._last_audio_sent_at
-                < self._keepalive_interval_s
-            ):
+            if time.monotonic() - self._last_audio_sent_at < self._keepalive_interval_s:
                 continue
 
             with self._conn_lock:
@@ -376,9 +366,7 @@ class DeepgramWSClient:
                         "isFinal": job.is_final,
                         "confidence": job.confidence,
                         "source": "cloud",
-                        "translationProvider": getattr(
-                            self.translator, "last_provider", "passthrough"
-                        ),
+                        "translationProvider": getattr(self.translator, "last_provider", "passthrough"),
                         "timestamp": time.time(),
                     }
                 )
@@ -395,9 +383,7 @@ class DeepgramWSClient:
             return " ".join(self._recent_context)
 
     def _coalesce_segments(self) -> str:
-        return " ".join(
-            segment.strip() for segment in self._current_segments if segment.strip()
-        ).strip()
+        return " ".join(segment.strip() for segment in self._current_segments if segment.strip()).strip()
 
     def _enqueue_translation(
         self,
@@ -517,7 +503,7 @@ class DeepgramWSClient:
     def _extract_soft_commit(
         self,
         text: str,
-        words: Optional[list[object]] = None,
+        words: list[object] | None = None,
     ) -> tuple[str, str]:
         normalized = text.strip()
         if not normalized:
@@ -542,7 +528,7 @@ class DeepgramWSClient:
         transcript: str,
         confidence: float,
         speech_final: bool,
-        words: Optional[list[object]] = None,
+        words: list[object] | None = None,
     ) -> None:
         normalized = transcript.strip()
         if not normalized:
@@ -605,9 +591,7 @@ class DeepgramWSClient:
         if preview_text:
             preview_context = final_context
             if final_text:
-                preview_context = " ".join(
-                    part for part in (final_context, final_text) if part
-                )
+                preview_context = " ".join(part for part in (final_context, final_text) if part)
             self._enqueue_translation(
                 preview_text,
                 confidence=confidence,

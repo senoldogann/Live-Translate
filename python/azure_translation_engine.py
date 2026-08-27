@@ -9,9 +9,8 @@ chain, Azure emits intermediate and final translated text from the same SDK.
 from __future__ import annotations
 
 import os
-import time
 import threading
-from typing import Optional
+import time
 
 AZURE_STABLE_PARTIAL_THRESHOLD = "2"
 DEFAULT_AZURE_PHRASES = (
@@ -56,25 +55,19 @@ class AzureSpeechTranslationClient:
         """Open a new Azure recognition session."""
         if self._running:
             if self.source_lang != language:
-                print(
-                    f"[AzureSpeech] Language changed ({self.source_lang} -> {language}), restarting..."
-                )
+                print(f"[AzureSpeech] Language changed ({self.source_lang} -> {language}), restarting...")
                 self.stop()
             else:
                 return
 
         if not self.has_credentials():
-            print(
-                "[AzureSpeech] WARNING: AZURE_SPEECH_KEY/AZURE_SPEECH_REGION missing — Azure cloud engine disabled."
-            )
+            print("[AzureSpeech] WARNING: AZURE_SPEECH_KEY/AZURE_SPEECH_REGION missing — Azure cloud engine disabled.")
             return
 
         try:
             import azure.cognitiveservices.speech as speechsdk  # type: ignore
         except ImportError:
-            print(
-                "[AzureSpeech] WARNING: azure-cognitiveservices-speech not installed — Azure cloud engine disabled."
-            )
+            print("[AzureSpeech] WARNING: azure-cognitiveservices-speech not installed — Azure cloud engine disabled.")
             return
 
         self.source_lang = language
@@ -90,9 +83,7 @@ class AzureSpeechTranslationClient:
         translation_config.add_target_language("tr")
 
         # Lower segmentation delay without aggressively chopping words.
-        segmentation_prop = getattr(
-            speechsdk.PropertyId, "Speech_SegmentationSilenceTimeoutMs", None
-        )
+        segmentation_prop = getattr(speechsdk.PropertyId, "Speech_SegmentationSilenceTimeoutMs", None)
         if segmentation_prop is not None:
             translation_config.set_property(segmentation_prop, "350")
 
@@ -102,9 +93,7 @@ class AzureSpeechTranslationClient:
             None,
         )
         if stable_partial_prop is not None:
-            translation_config.set_property(
-                stable_partial_prop, AZURE_STABLE_PARTIAL_THRESHOLD
-            )
+            translation_config.set_property(stable_partial_prop, AZURE_STABLE_PARTIAL_THRESHOLD)
 
         stream_format = speechsdk.audio.AudioStreamFormat(
             samples_per_second=16000,
@@ -163,9 +152,7 @@ class AzureSpeechTranslationClient:
 
         if recognizer is not None:
             try:
-                stop_async = getattr(
-                    recognizer, "stop_continuous_recognition_async", None
-                )
+                stop_async = getattr(recognizer, "stop_continuous_recognition_async", None)
                 if callable(stop_async):
                     stop_async().get()
                 else:
@@ -184,9 +171,7 @@ class AzureSpeechTranslationClient:
         self._last_final_pair = ("", "")
         print("[AzureSpeech] Stopped.")
 
-    def update_credentials(
-        self, new_key: Optional[str] = None, new_region: Optional[str] = None
-    ) -> None:
+    def update_credentials(self, new_key: str | None = None, new_region: str | None = None) -> None:
         next_key = self.api_key if new_key is None else new_key.strip()
         next_region = self.region if new_region is None else new_region.strip().lower()
 
@@ -213,11 +198,7 @@ class AzureSpeechTranslationClient:
     def _get_phrase_hints(self) -> tuple[str, ...]:
         raw_phrases = os.getenv("AZURE_SPEECH_PHRASES", "")
         if raw_phrases.strip():
-            phrases = tuple(
-                phrase.strip()
-                for phrase in raw_phrases.split(",")
-                if phrase.strip()
-            )
+            phrases = tuple(phrase.strip() for phrase in raw_phrases.split(",") if phrase.strip())
             if phrases:
                 return phrases
 
@@ -271,10 +252,7 @@ class AzureSpeechTranslationClient:
         if not self.publisher or not original or not translated:
             return
 
-        print(
-            f"[Transcript] cloud {'FINAL' if is_final else 'PREVIEW'} (azure-speech): "
-            f"'{original[:80]}'"
-        )
+        print(f"[Transcript] cloud {'FINAL' if is_final else 'PREVIEW'} (azure-speech): '{original[:80]}'")
         self.publisher.publish(
             {
                 "original": original,
