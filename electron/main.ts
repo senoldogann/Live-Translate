@@ -6,12 +6,13 @@
  * Bu sayede pencere ekran paylaşımı ve ekran kaydında GÖRÜNMEZ olur.
  */
 
-import { app, BrowserWindow, ipcMain, screen, globalShortcut, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, safeStorage, screen, globalShortcut, shell } from 'electron';
 import type { WebPreferences } from 'electron';
 import { spawn, ChildProcess, exec } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import * as net from 'net';
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'util';
 import { URL } from 'url';
 
@@ -77,6 +78,7 @@ interface InteractiveZone {
 
 interface SetupConfig {
     isSetupComplete: boolean;
+    hasCloudProvider?: boolean;
     language?: string;
     engineType?: 'local' | 'cloud';
     wordByWord?: boolean;
@@ -88,6 +90,13 @@ interface SetupConfig {
     ollamaApiKey?: string;
     ollamaModel?: string;
 }
+
+const SENSITIVE_SETUP_KEYS = [
+    'azureSpeechKey',
+    'deepgramKey',
+    'deeplKey',
+    'ollamaApiKey',
+] as const;
 
 interface ApiKeyValidationStatus {
     ok: boolean;
@@ -116,6 +125,19 @@ interface ApiSettingsSaveResult {
     message: string;
     validation?: ApiKeyValidationResult;
     config?: SetupConfig;
+}
+
+interface EncryptedCredential {
+    version: 1;
+    provider: 'safeStorage';
+    data: string;
+}
+
+interface SignedMessageEnvelope {
+    v: 1;
+    payload: string;
+    ts: number;
+    sig: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -153,6 +175,7 @@ function isSafeExternalUrl(urlString: string): boolean {
 
 const VALID_CONFIG_KEYS = new Set([
     'isSetupComplete',
+    'hasCloudProvider',
     'setupComplete',
     'language',
     'engineType',
@@ -360,6 +383,7 @@ let isInteractionEnabled = true;
 let hasReceivedZones = false;
 let historyWindow: BrowserWindow | null = null; // Transcript history window
 let apiSettingsWindow: BrowserWindow | null = null;
+let apiSettingsWindowOpening = false;
 let usageGuideWindow: BrowserWindow | null = null;
 let latestHistoryTranscripts: unknown[] = [];
 let latestApiSettingsDraft: ApiSettingsDraft = {
@@ -386,11 +410,110 @@ const PYTHON_RECOVERY_RETRY_DELAY_MS = 500;
 // Environment
 const isDev = !app.isPackaged;
 const VITE_DEV_SERVER_URL = 'http://localhost:5174';
+const ENGINE_SESSION_ID = randomUUID();
+const ZMQ_AUTH_TOKEN = randomBytes(32).toString('base64url');
 const ZMQ_HOST = '127.0.0.1';
 const ZMQ_PORT = 5555;
 const ZMQ_COMMAND_PORT = 5556;
-const ZMQ_ADDRESS = `tcp://${ZMQ_HOST}:${ZMQ_PORT}`;
-const ZMQ_COMMAND_ADDRESS = `tcp://${ZMQ_HOST}:${ZMQ_COMMAND_PORT}`;
+const SIGNED_MESSAGE_REPLAY_WINDOW_MS = 15_000;
+let lastSignedTranscriptTimeMs: number | null = null;
+
+function getEngineSocketDirectory(): string {
+    const socketDir = path.join('/tmp', `live-translate-${ENGINE_SESSION_ID}`);
+    fs.mkdirSync(socketDir, { recursive: true });
+    fs.chmodSync(socketDir, 0o700);
+    return socketDir;
+}
+
+function getZmqAddress(channel: 'transcript' | 'command'): string {
+    if (process.platform === 'darwin') {
+        return `ipc://${path.join(getEngineSocketDirectory(), `${channel}.sock`)}`;
+    }
+
+    return channel === 'transcript'
+        ? `tcp://${ZMQ_HOST}:${ZMQ_PORT}`
+        : `tcp://${ZMQ_HOST}:${ZMQ_COMMAND_PORT}`;
+}
+
+// Runtime dogrulamasinin kullanicinin gercek konfigurasyonuna dokunmamasi icin izole userData yolu kullanilir.
+function useIsolatedUserDataForTesting(): void {
+    const isolatedDirectory = process.env.LIVE_TRANSLATE_USER_DATA_DIR;
+    if (!isolatedDirectory) {
+        return;
+    }
+    if (!path.isAbsolute(isolatedDirectory)) {
+        throw new Error(`LIVE_TRANSLATE_USER_DATA_DIR mutlak bir yol olmali: ${isolatedDirectory}`);
+    }
+
+    fs.mkdirSync(isolatedDirectory, { recursive: true });
+    fs.chmodSync(isolatedDirectory, 0o700);
+    app.setPath('userData', isolatedDirectory);
+}
+
+useIsolatedUserDataForTesting();
+
+function signCommandMessage(payloadObject: Record<string, unknown>): string {
+    const payload = JSON.stringify(payloadObject);
+    const ts = Date.now();
+    const sig = createHmac('sha256', ZMQ_AUTH_TOKEN)
+        .update(`${ts}.${payload}`)
+        .digest('hex');
+    return JSON.stringify({ v: 1, payload, ts, sig } satisfies SignedMessageEnvelope);
+}
+
+function verifySignedMessage(message: Buffer): Record<string, unknown> | null {
+    let envelope: unknown;
+    try {
+        envelope = JSON.parse(message.toString('utf8'));
+    } catch {
+        console.warn('[Main] ZMQ invalid envelope', { event: 'invalid-json' });
+        return null;
+    }
+
+    if (
+        typeof envelope !== 'object' || envelope === null
+        || (envelope as SignedMessageEnvelope).v !== 1
+        || typeof (envelope as SignedMessageEnvelope).payload !== 'string'
+        || !Number.isSafeInteger((envelope as SignedMessageEnvelope).ts)
+        || typeof (envelope as SignedMessageEnvelope).sig !== 'string'
+    ) {
+        console.warn('[Main] ZMQ invalid signed message', { event: 'invalid-envelope' });
+        return null;
+    }
+
+    const record = envelope as SignedMessageEnvelope;
+    const expectedSignature = createHmac('sha256', ZMQ_AUTH_TOKEN)
+        .update(`${record.ts}.${record.payload}`)
+        .digest('hex');
+    const expected = Buffer.from(expectedSignature, 'utf8');
+    const received = Buffer.from(record.sig, 'utf8');
+    if (expected.length !== received.length || !timingSafeEqual(expected, received)) {
+        console.warn('[Main] ZMQ signature rejected', { event: 'signature-mismatch' });
+        return null;
+    }
+
+    const nowMs = Date.now();
+    if (Math.abs(nowMs - record.ts) > SIGNED_MESSAGE_REPLAY_WINDOW_MS) {
+        console.warn('[Main] ZMQ timestamp rejected', { event: 'replay-window-exceeded' });
+        return null;
+    }
+    if (lastSignedTranscriptTimeMs !== null && record.ts <= lastSignedTranscriptTimeMs) {
+        console.warn('[Main] ZMQ replay rejected', { event: 'replayed-timestamp' });
+        return null;
+    }
+    lastSignedTranscriptTimeMs = record.ts;
+
+    try {
+        const payload = JSON.parse(record.payload);
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+            return null;
+        }
+        return payload as Record<string, unknown>;
+    } catch {
+        console.warn('[Main] ZMQ invalid signed payload', { event: 'invalid-payload' });
+        return null;
+    }
+}
 
 function getPreloadPath() {
     return isDev
@@ -423,6 +546,10 @@ function normalizeSetupConfig(raw: unknown): SetupConfig {
     const normalized: SetupConfig = {
         isSetupComplete: Boolean(value.isSetupComplete ?? value.setupComplete),
     };
+
+    if (typeof value.hasCloudProvider === 'boolean') {
+        normalized.hasCloudProvider = value.hasCloudProvider;
+    }
 
     if (value.language === 'en' || value.language === 'fi' || value.language === 'tr') {
         normalized.language = value.language;
@@ -467,33 +594,165 @@ function normalizeSetupConfig(raw: unknown): SetupConfig {
     return normalized;
 }
 
-function readSetupConfig(): SetupConfig {
+function readRawPersistedSetupConfig(): unknown | null {
+    let contents: string;
+
     try {
-        const data = fs.readFileSync(getSetupConfigPath(), 'utf8');
-        return normalizeSetupConfig(JSON.parse(data));
-    } catch {
+        contents = fs.readFileSync(getSetupConfigPath(), 'utf8');
+    } catch (error) {
+        const err = error as NodeJS.ErrnoException;
+        if (err.code === 'ENOENT') {
+            return null;
+        }
+        throw err;
+    }
+
+    try {
+        return JSON.parse(contents);
+    } catch (error) {
+        throw new Error(`Geçersiz kurulum yapılandırması: ${getSetupConfigPath()}`, { cause: error });
+    }
+}
+
+async function assertSafeStorageReady(): Promise<void> {
+    if (!app.isReady()) {
+        throw new Error('safeStorage için uygulama hazır olmalı.');
+    }
+    if (!(await safeStorage.isAsyncEncryptionAvailable())) {
+        throw new Error('macOS Keychain üzerinden anahtar şifreleme kullanılamıyor.');
+    }
+}
+
+function createEncryptedCredential(plainText: string): Promise<EncryptedCredential> {
+    return safeStorage.encryptStringAsync(plainText).then((data) => ({
+        version: 1,
+        provider: 'safeStorage',
+        data: data.toString('base64'),
+    }));
+}
+
+async function readDecryptedCredential(value: unknown): Promise<string | undefined> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return undefined;
+    }
+    const record = value as Record<string, unknown>;
+    if (
+        record.version !== 1
+        || record.provider !== 'safeStorage'
+        || typeof record.data !== 'string'
+    ) {
+        throw new Error('Şifreli kimlik bilgisi formatı geçersiz.');
+    }
+
+    const decoded = await safeStorage.decryptStringAsync(Buffer.from(record.data, 'base64'));
+    const result = decoded as string | { result?: string };
+    if (typeof result === 'string') {
+        return result;
+    }
+    if (typeof result.result === 'string') {
+        return result.result;
+    }
+    throw new Error('safeStorage yanıtı çözülemiyor.');
+}
+
+async function readSetupConfig(): Promise<SetupConfig> {
+    const raw = readRawPersistedSetupConfig();
+    if (!raw) {
+        return { isSetupComplete: false };
+    }
+    if (!isValidConfig(raw)) {
+        throw new Error(`Kurulum yapılandırmasında izin verilmeyen alan var: ${getSetupConfigPath()}`);
+    }
+    const value = raw as Record<string, unknown>;
+    const normalized = normalizeSetupConfig(raw);
+
+    for (const key of SENSITIVE_SETUP_KEYS) {
+        const rawValue = value[key];
+        if (!rawValue) {
+            continue;
+        }
+        await assertSafeStorageReady();
+        const decryptedValue = await readDecryptedCredential(rawValue);
+        if (decryptedValue !== undefined) {
+            normalized[key] = decryptedValue;
+        }
+    }
+
+    return normalized;
+}
+
+async function writeSetupConfig(config: SetupConfig): Promise<void> {
+    if (!isValidConfig(config)) {
+        throw new Error(`Kurulum yapılandırması doğrulanamadı: ${JSON.stringify(redactSetupConfig(config))}`);
+    }
+    await assertSafeStorageReady();
+
+    const stored: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(config)) {
+        if (value === undefined) {
+            continue;
+        }
+        if (key === 'hasCloudProvider') {
+            continue;
+        }
+        if ((SENSITIVE_SETUP_KEYS as readonly string[]).includes(key)) {
+            if (typeof value !== 'string') {
+                throw new Error(`${key} şifrelenebilir bir metin olmalı.`);
+            }
+            if (!value) {
+                continue;
+            }
+            stored[key] = await createEncryptedCredential(value);
+            continue;
+        }
+        stored[key] = value;
+    }
+
+    const configPath = getSetupConfigPath();
+    const configDir = path.dirname(configPath);
+    if (!fs.existsSync(configDir)) {
+        fs.mkdirSync(configDir, { recursive: true });
+    }
+    fs.writeFileSync(configPath, `${JSON.stringify(stored, null, 2)}\n`, { mode: 0o600 });
+}
+
+function readPublicSetupSnapshot(): Pick<SetupConfig, 'isSetupComplete'> {
+    try {
+        const raw = readRawPersistedSetupConfig();
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+            return { isSetupComplete: false };
+        }
+        const value = raw as Record<string, unknown>;
+        return {
+            isSetupComplete: Boolean(value.isSetupComplete ?? value.setupComplete),
+        };
+    } catch (error) {
+        console.error('[Main] Kamu kurulum bilgisi okunamadi:', error);
         return { isSetupComplete: false };
     }
 }
 
-function writeSetupConfig(config: SetupConfig): boolean {
-    if (!isValidConfig(config)) {
-        return false;
-    }
+function redactSetupConfig(config: SetupConfig): SetupConfig {
+    return {
+        ...config,
+        hasCloudProvider: Boolean(
+            (config.azureSpeechKey?.trim() && config.azureSpeechRegion?.trim())
+            || config.deepgramKey?.trim(),
+        ),
+        azureSpeechKey: undefined,
+        deepgramKey: undefined,
+        deeplKey: undefined,
+        ollamaApiKey: undefined,
+    };
+}
 
-    try {
-        const configPath = getSetupConfigPath();
-        const configDir = path.dirname(configPath);
-        if (!fs.existsSync(configDir)) {
-            fs.mkdirSync(configDir, { recursive: true });
-        }
+function preserveOmittedCredentials(next: SetupConfig, previous: SetupConfig): SetupConfig {
+    const azureSpeechKey = next.azureSpeechKey === undefined ? previous.azureSpeechKey : next.azureSpeechKey;
+    const deepgramKey = next.deepgramKey === undefined ? previous.deepgramKey : next.deepgramKey;
+    const deeplKey = next.deeplKey === undefined ? previous.deeplKey : next.deeplKey;
+    const ollamaApiKey = next.ollamaApiKey === undefined ? previous.ollamaApiKey : next.ollamaApiKey;
 
-        fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-        return true;
-    } catch (error) {
-        console.error('[Main] Failed to write setup config:', error);
-        return false;
-    }
+    return { ...next, azureSpeechKey, deepgramKey, deeplKey, ollamaApiKey };
 }
 
 function buildApiSettingsDraft(config: SetupConfig): ApiSettingsDraft {
@@ -1451,7 +1710,7 @@ async function saveApiSettingsDraft(draft: unknown): Promise<ApiSettingsSaveResu
 
     const hasAzure = Boolean(sanitized.azureSpeechKey.trim() && sanitized.azureSpeechRegion.trim());
     const hasCloudProvider = hasAzure || Boolean(sanitized.deepgramKey.trim());
-    const currentConfig = readSetupConfig();
+    const currentConfig = await readSetupConfig();
     const previousEngineType = currentConfig.engineType ?? 'local';
     const nextEngineType =
         !hasCloudProvider && previousEngineType === 'cloud'
@@ -1473,13 +1732,7 @@ async function saveApiSettingsDraft(draft: unknown): Promise<ApiSettingsSaveResu
         engineType: nextEngineType,
     };
 
-    if (!writeSetupConfig(nextConfig)) {
-        return {
-            ok: false,
-            message: 'API ayarlari dogrulandi ama config diske yazilamadi.',
-            validation,
-        };
-    }
+    await writeSetupConfig(nextConfig);
 
     latestApiSettingsDraft = buildApiSettingsDraft(nextConfig);
 
@@ -1499,13 +1752,15 @@ async function saveApiSettingsDraft(draft: unknown): Promise<ApiSettingsSaveResu
         }, 'engine_type');
     }
 
-    notifyApiSettingsUpdated(nextConfig);
+    const publicConfig = redactSetupConfig(nextConfig);
+
+    notifyApiSettingsUpdated(publicConfig);
 
     return {
         ok: true,
         message: 'API ayarlari dogrulandi, kaydedildi ve engine tarafina iletildi.',
         validation,
-        config: nextConfig,
+        config: publicConfig,
     };
 }
 
@@ -1520,7 +1775,7 @@ function createStealthWindow(): BrowserWindow {
     const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
 
     // If setup is not complete, show a larger window for the wizard
-    const setupConfig = readSetupConfig();
+    const setupConfig = readPublicSetupSnapshot();
     const windowHeight = setupConfig.isSetupComplete ? 280 : 600;
 
     const windowWidth = Math.min(1000, Math.floor(screenWidth * 0.75));
@@ -1558,7 +1813,7 @@ function createStealthWindow(): BrowserWindow {
 /**
  * Python AI Engine'i başlat
  */
-function startPythonEngine(): ChildProcess | null {
+function startPythonEngine(setupConfig: SetupConfig): ChildProcess | null {
     const pythonPath = getPythonScriptPath();
     const venvPython = getPythonBinaryPath();
     let sawZmqBindConflict = false;
@@ -1566,15 +1821,16 @@ function startPythonEngine(): ChildProcess | null {
     console.log('[Main] Starting Python engine:', pythonPath);
     console.log('[Main] Using Python:', venvPython);
 
-    // Setup Config üzerinden API Key okuma
     let env = { ...process.env };
-    const setupConfig = readSetupConfig();
     if (setupConfig.azureSpeechKey) env.AZURE_SPEECH_KEY = setupConfig.azureSpeechKey;
     if (setupConfig.azureSpeechRegion) env.AZURE_SPEECH_REGION = setupConfig.azureSpeechRegion;
     if (setupConfig.deepgramKey) env.DEEPGRAM_API_KEY = setupConfig.deepgramKey;
     if (setupConfig.deeplKey) env.DEEPL_API_KEY = setupConfig.deeplKey;
     if (setupConfig.language) env.ENGINE_SOURCE_LANG = setupConfig.language;
     if (setupConfig.engineType) env.ENGINE_TYPE = setupConfig.engineType;
+    env.TRANSCRIPT_ZMQ_ADDRESS = getZmqAddress('transcript');
+    env.COMMAND_ZMQ_ADDRESS = getZmqAddress('command');
+    env.ZMQ_AUTH_TOKEN = ZMQ_AUTH_TOKEN;
 
     try {
         const proc = spawn(venvPython, [pythonPath], {
@@ -1662,51 +1918,37 @@ async function startZmqSubscriber(): Promise<void> {
         zmq = await import('zeromq');
         const subscriber = new zmq.Subscriber();
 
-        subscriber.connect(ZMQ_ADDRESS);
+        const transcriptAddress = getZmqAddress('transcript');
+        subscriber.connect(transcriptAddress);
         subscriber.subscribe(''); // Tüm mesajları al
 
-        console.log(`[ZMQ] Subscriber connected to ${ZMQ_ADDRESS}`);
+        console.log('[ZMQ] Subscriber ready', { transport: 'local' });
         zmqSubscriber = subscriber;
 
         // Mesaj döngüsü
         (async () => {
             for await (const [msg] of subscriber) {
-                try {
-                    const data = JSON.parse(msg.toString());
+                const data = verifySignedMessage(msg);
+                if (!data) {
+                    continue;
+                }
 
-                    // Renderer'a gönder
-                    if (mainWindow && !mainWindow.isDestroyed()) {
-                        if (data.type === 'audio_level') {
-                            // Visualizer update (High frequency)
-                            mainWindow.webContents.send('audio-level', data.level);
-                        } else {
-                            // Transcript update
-                            mainWindow.webContents.send('transcript-update', data);
-                            saveFinalizedTranscript(data);
-                        }
+                // Renderer'a gönder
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    if (data.type === 'audio_level') {
+                        // Visualizer update (High frequency)
+                        mainWindow.webContents.send('audio-level', data.level);
+                    } else {
+                        // Transcript update
+                        mainWindow.webContents.send('transcript-update', data);
+                        saveFinalizedTranscript(data);
                     }
-                } catch (parseError) {
-                    console.error('[ZMQ] Failed to parse message:', parseError);
                 }
             }
         })();
     } catch (error) {
         console.error('[ZMQ] Failed to start subscriber:', error);
-        console.log('[ZMQ] Falling back to mock data for development...');
-
-        // Development fallback: Mock data
-        if (isDev) {
-            setInterval(() => {
-                if (mainWindow && !mainWindow.isDestroyed()) {
-                    mainWindow.webContents.send('transcript-update', {
-                        original: 'This is a test transcription...',
-                        translated: 'Bu bir test transkripsiyonu...',
-                        timestamp: Date.now(),
-                        isFinal: true,
-                    });
-                }
-            }, 3000);
-        }
+        throw error;
     }
 }
 
@@ -1717,8 +1959,9 @@ async function startZmqPublisher(): Promise<void> {
     try {
         const zmq = await import('zeromq');
         commandSock = new zmq.Publisher();
-        await commandSock.bind(ZMQ_COMMAND_ADDRESS);
-        console.log(`[ZMQ] Command Publisher bound to ${ZMQ_COMMAND_ADDRESS}`);
+        const commandAddress = getZmqAddress('command');
+        await commandSock.bind(commandAddress);
+        console.log('[ZMQ] Command publisher ready', { transport: 'local' });
     } catch (error) {
         console.error('[ZMQ] Failed to start publisher:', error);
     }
@@ -1739,7 +1982,7 @@ async function broadcastCommand(
 
     for (let i = 0; i < attempts; i++) {
         try {
-            await commandSock.send(JSON.stringify(payload));
+            await commandSock.send(signCommandMessage(payload));
             sent = true;
             if (i === 0) {
                 console.log(`[Main] ${label} sent`);
@@ -1830,8 +2073,13 @@ async function terminateLingeringPythonEngines(): Promise<number[]> {
 }
 
 async function recoverStalePythonEngines(): Promise<boolean> {
-    await requestStaleEngineShutdown();
     const terminated = await terminateLingeringPythonEngines();
+    if (process.platform === 'darwin') {
+        await sleep(300);
+        return true;
+    }
+
+    await requestStaleEngineShutdown();
     const portFreed = await waitForPortToBeFree(
         ZMQ_PORT,
         terminated.length > 0 ? PYTHON_PORT_RELEASE_TIMEOUT_MS : PYTHON_PORT_RELEASE_TIMEOUT_MS / 2,
@@ -1870,7 +2118,7 @@ async function launchPythonEngineWithRecovery(reason: string): Promise<void> {
         }
 
         if (!pythonProcess) {
-            pythonProcess = startPythonEngine();
+            pythonProcess = startPythonEngine(await readSetupConfig());
         }
     } finally {
         pythonRecoveryInFlight = false;
@@ -1991,34 +2239,35 @@ function setupIpcHandlers(): void {
     // ═══════════════════════════════════════════════════════════════
     // Setup Wizard IPC Handlers
     // ═══════════════════════════════════════════════════════════════
-    ipcMain.handle('get-config', () => {
-        return readSetupConfig();
+    ipcMain.handle('get-config', async () => {
+        return redactSetupConfig(await readSetupConfig());
     });
 
-    ipcMain.handle('save-config', async (_event, config) => {
+    ipcMain.handle('save-config', async (_event, config: SetupConfig) => {
         // Validate config schema before writing to disk
         if (!isValidConfig(config)) {
             console.warn('[Main] Invalid config rejected:', JSON.stringify(config));
             return false;
         }
         const normalized = normalizeSetupConfig(config);
+        const persisted = await readSetupConfig();
+        // Renderer anahtar gondermiyorsa mevcut sifreli degeri koru; bos metin bilincli silme isteigidir.
+        const merged = preserveOmittedCredentials(normalized, persisted);
 
-        if (!writeSetupConfig(normalized)) {
-            return false;
-        }
+        await writeSetupConfig(merged);
 
-        latestApiSettingsDraft = buildApiSettingsDraft(normalized);
+        latestApiSettingsDraft = buildApiSettingsDraft(merged);
         console.log('[Main] Config saved successfully to:', getSetupConfigPath());
 
         await broadcastCommand({
             type: 'update_keys',
-            azureSpeech: normalized.azureSpeechKey,
-            azureSpeechRegion: normalized.azureSpeechRegion,
-            deepgram: normalized.deepgramKey,
-            deepl: normalized.deeplKey
+            azureSpeech: merged.azureSpeechKey,
+            azureSpeechRegion: merged.azureSpeechRegion,
+            deepgram: merged.deepgramKey,
+            deepl: merged.deeplKey
         }, 'update_keys');
 
-        notifyApiSettingsUpdated(normalized);
+        notifyApiSettingsUpdated(redactSetupConfig(merged));
         return true;
     });
 
@@ -2104,7 +2353,7 @@ function setupIpcHandlers(): void {
 
     ipcMain.handle('generate-ollama-report', async (_event, transcripts) => {
         try {
-            const config = readSetupConfig();
+            const config = await readSetupConfig();
             if (!config.ollamaEndpoint || !config.ollamaModel) {
                 return { ok: false, message: 'Ollama URL veya Model secilmedi. Lutfen API Ayarlarini kontrol edin.' };
             }
@@ -2166,39 +2415,47 @@ function setupIpcHandlers(): void {
         }
     });
 
-    ipcMain.on('open-api-settings-window', (_event, draft) => {
-        const savedDraft = buildApiSettingsDraft(readSetupConfig());
-        latestApiSettingsDraft =
-            typeof draft === 'object' && draft !== null && !Array.isArray(draft)
-                ? sanitizeApiSettingsDraft(draft)
-                : savedDraft;
+    ipcMain.on('open-api-settings-window', () => {
+        // Pencere acilana kadar tekrar gelen IPC isteklerini ayni pencere state'i ile birlestiriyoruz.
+        if (apiSettingsWindowOpening) {
+            return;
+        }
 
         if (apiSettingsWindow && !apiSettingsWindow.isDestroyed()) {
             apiSettingsWindow.close();
             return;
         }
 
-        if (usageGuideWindow && !usageGuideWindow.isDestroyed()) {
-            usageGuideWindow.close();
-        }
+        void (async () => {
+            apiSettingsWindowOpening = true;
+            try {
+                latestApiSettingsDraft = buildApiSettingsDraft(await readSetupConfig());
 
-        apiSettingsWindow = createUtilityWindow({
-            width: 760,
-            height: 780,
-            minWidth: 680,
-            minHeight: 720,
-            title: 'API Ayarlari',
-        });
+                if (usageGuideWindow && !usageGuideWindow.isDestroyed()) {
+                    usageGuideWindow.close();
+                }
 
-        apiSettingsWindow.webContents.on('did-finish-load', () => {
-            pushApiSettingsDataToWindow();
-        });
+                apiSettingsWindow = createUtilityWindow({
+                    width: 760,
+                    height: 780,
+                    minWidth: 680,
+                    minHeight: 720,
+                    title: 'API Ayarlari',
+                });
 
-        apiSettingsWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildApiSettingsWindowHtml())}`);
+                apiSettingsWindow.webContents.on('did-finish-load', () => {
+                    pushApiSettingsDataToWindow();
+                });
 
-        apiSettingsWindow.on('closed', () => {
-            apiSettingsWindow = null;
-        });
+                apiSettingsWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildApiSettingsWindowHtml())}`);
+
+                apiSettingsWindow.on('closed', () => {
+                    apiSettingsWindow = null;
+                });
+            } finally {
+                apiSettingsWindowOpening = false;
+            }
+        })();
     });
 
     ipcMain.handle('save-api-settings-window', async (_event, draft) => {
@@ -2276,7 +2533,9 @@ function setupIpcHandlers(): void {
         }
         // Delay respawn to let old process clean up
         setTimeout(() => {
-            pythonProcess = startPythonEngine();
+            void (async () => {
+                pythonProcess = startPythonEngine(await readSetupConfig());
+            })();
         }, 500);
     });
 
@@ -2481,7 +2740,12 @@ if (!gotTheLock) {
 
         // Start ZMQ subscriber after Python has had time to bind its port
         setTimeout(() => {
-            startZmqSubscriber();
+            startZmqSubscriber().catch((error: unknown) => {
+                console.error('[Main] ZMQ subscriber startup failed:', error);
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('engine-log', '[Python] Yerel motor kanali baslatilamadi.');
+                }
+            });
         }, 2000);
 
         startInteractionPolling();
@@ -2588,6 +2852,14 @@ app.on('before-quit', () => {
             console.error('[Main] Error closing ZMQ command socket:', e);
         }
         commandSock = null;
+    }
+
+    if (process.platform === 'darwin') {
+        try {
+            fs.rmSync(getEngineSocketDirectory(), { recursive: true, force: true });
+        } catch (e) {
+            console.error('[Main] Error removing local engine sockets:', e);
+        }
     }
 });
 

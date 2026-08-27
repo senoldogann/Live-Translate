@@ -37,18 +37,19 @@ If you discover a security vulnerability in Stealth Subtitle Translator, please 
 - **`shell.openExternal`**: URL whitelist enforced — only known domains allowed.
 
 ### Data Handling
-- **API Keys**: Stored in user-local config file (`userData`), never committed to git.
+- **API Keys**: Stored in `userData` only as Electron `safeStorage` ciphertext (base64) inside a `0600` config file and never sent back to the renderer. A legacy plaintext field is migrated on the next credential write.
 - **No Telemetry**: The app does not phone home or collect any data.
 - **Screen Protection**: `setContentProtection(true)` prevents screen capture of the overlay.
 - **IPC Validation**: Config payloads are schema-validated before writing to disk.
 
 ### Python Engine
 - Runs as a local child process — no network listeners except `localhost` ZMQ.
-- ZMQ binds to `127.0.0.1` only — not accessible from other machines.
+- On macOS the ZMQ pair uses per-process Unix-domain sockets under a `0700` session directory; TCP remains only as the non-macOS compatibility path.
+- Transcript and command traffic is signed with HMAC-SHA256, timestamped, versioned and replay-checked by both processes.
 
 ## Known Limitations
 
-- API keys are stored as plaintext JSON in `userData`. Future versions may integrate OS keychain (macOS Keychain, Windows Credential Manager).
+- Legacy plaintext API keys remain until the next configuration save migrates them to encrypted values.
 - The `setContentProtection` API is macOS-only. On other platforms, the overlay may be visible in screen captures.
 
 ## Dependencies

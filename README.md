@@ -78,7 +78,7 @@ graph TD
     TranslationChain -->|"Tier 1"| DeepL["DeepL API"]
     Azure -->|translated text| Electron["Electron Main"]
     Deepgram -->|translated text| Electron
-    TranslationChain -->|ZMQ TCP:5555| Electron
+    TranslationChain -->|ZMQ IPC/HMAC| Electron
     Electron -->|IPC| React["React Renderer (UI)"]
 ```
 

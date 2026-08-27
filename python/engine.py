@@ -18,6 +18,8 @@ Gereksinimler:
 - Apple Silicon için optimize edilmiş (M1/M2/M3)
 """
 
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -75,6 +77,8 @@ class EngineConfig:
 
     # ZMQ settings
     zmq_address: str = "tcp://127.0.0.1:5555"
+    command_address: str = "tcp://127.0.0.1:5556"
+    zmq_auth_token: str | None = None
 
     # Audio device
     audio_device: str | None = "BlackHole 2ch"  # None for default
@@ -103,6 +107,18 @@ def _parse_bool_env(value: str | None) -> bool | None:
 
 
 def apply_runtime_env_overrides(config: EngineConfig) -> None:
+    transcript_address = os.getenv("TRANSCRIPT_ZMQ_ADDRESS")
+    if transcript_address:
+        config.zmq_address = transcript_address
+
+    command_address = os.getenv("COMMAND_ZMQ_ADDRESS")
+    if command_address:
+        config.command_address = command_address
+
+    zmq_auth_token = os.getenv("ZMQ_AUTH_TOKEN")
+    if zmq_auth_token:
+        config.zmq_auth_token = zmq_auth_token
+
     source_lang = os.getenv("ENGINE_SOURCE_LANG", "").strip().lower()
     if source_lang in {"en", "fi", "tr"}:
         config.source_lang = source_lang
@@ -296,7 +312,11 @@ class AudioCapture:
         except Exception as e:
             print(f"[Audio] Failed to start capture: {e}")
             self._running = False
-            raise
+            device_label = str(self.device_id) if self.device_id is not None else "default"
+            raise RuntimeError(
+                f"Ses girdisi acilamadi (device={device_label}). BlackHole kurulumunu, macOS mikrofon iznini "
+                "veya ornegin baska bir uygulama tarafindan kullanildigini kontrol edin."
+            ) from e
 
     def stop(self):
         """Stop audio capture"""
@@ -797,10 +817,34 @@ class ZmqPublisher:
     Low latency pub/sub pattern.
     """
 
-    def __init__(self, address: str = "tcp://127.0.0.1:5555"):
+    def __init__(self, address: str = "tcp://127.0.0.1:5555", auth_token: str | None = None):
         self.address = address
+        self.auth_token = auth_token
         self.socket = None
         self.context = None
+
+    def _encode_message(self, result) -> str:
+        """Sonucu imzali ZMQ zarfina cevirir."""
+        result_data: object
+        if hasattr(result, "__dataclass_fields__"):
+            result_data = asdict(result)
+        elif isinstance(result, dict):
+            result_data = result
+        else:
+            return ""
+
+        payload = json.dumps(result_data, separators=(",", ":"), sort_keys=True)
+        if not self.auth_token:
+            raise ValueError("ZMQ auth token eksik.")
+
+        timestamp_ms = int(time.time() * 1000)
+        signature = hmac.new(
+            self.auth_token.encode("utf-8"),
+            f"{timestamp_ms}.{payload}".encode(),
+            hashlib.sha256,
+        ).hexdigest()
+        envelope = {"v": 1, "payload": payload, "ts": timestamp_ms, "sig": signature}
+        return json.dumps(envelope, separators=(",", ":"), sort_keys=True)
 
     def start(self):
         """Start ZMQ publisher"""
@@ -823,20 +867,16 @@ class ZmqPublisher:
             print(f"[ZMQ] Critical Error - Failed to start: {e}")
             print("[ZMQ] Please check if another instance of the app is running.")
             sys.exit(1)  # Fail fast to prevent zombie process
-            self.socket = None
 
     def publish(self, result):
         """Publish transcript result or generic dict"""
-        if hasattr(result, "__dataclass_fields__"):
-            data = json.dumps(asdict(result))
-        elif isinstance(result, dict):
-            data = json.dumps(result)
-        else:
+        message = self._encode_message(result)
+        if not message:
             return  # Ignore unknown types
 
         if self.socket:
             try:
-                self.socket.send_string(data)
+                self.socket.send_string(message)
             except Exception as e:
                 print(f"[ZMQ] Send error: {e}")
         # else:
@@ -876,9 +916,13 @@ class SubtitleEngine:
     def __init__(self, config: EngineConfig):
         self.config = config
         self._running = False
+        self._zmq_auth_token = config.zmq_auth_token or os.getenv("ZMQ_AUTH_TOKEN")
+        if sys.platform == "darwin" and not self._zmq_auth_token:
+            raise RuntimeError("macOS motor kanali icin ZMQ_AUTH_TOKEN zorunludur.")
         self._last_speech_time = 0.0
         self._last_transcript_time = 0.0
         self._min_transcript_interval = 0.35
+        self._last_signed_command_time_ms: int | None = None
         self._deepgram = DeepgramWSClient(None)  # we set publisher below
         self._azure_speech = AzureSpeechTranslationClient(None)
         self._listening_epoch = 0
@@ -913,7 +957,7 @@ class SubtitleEngine:
 
         self.translator = TranslationEngine(source_lang=config.source_lang, target_lang=config.target_lang)
 
-        self.publisher = ZmqPublisher(address=config.zmq_address)
+        self.publisher = ZmqPublisher(address=config.zmq_address, auth_token=self._zmq_auth_token)
         self._deepgram.publisher = self.publisher
         self._deepgram.translator = self.translator
         self._deepgram.streaming_mode = config.streaming_mode
@@ -928,8 +972,7 @@ class SubtitleEngine:
         self._command_thread: threading.Thread | None = None
         self._command_context = zmq.Context()
         self._command_socket = self._command_context.socket(zmq.SUB)
-        # Note: Electron Binds to 5556, we Connect to it.
-        self._command_socket.connect("tcp://127.0.0.1:5556")
+        self._command_socket.connect(config.command_address)
         self._command_socket.setsockopt_string(zmq.SUBSCRIBE, "")
 
         # Audio Level Broadcasting State
@@ -1050,6 +1093,56 @@ class SubtitleEngine:
                 if now - self._last_speech_time >= self._silence_threshold:
                     self._process_event.set()
 
+    def _verify_signed_message(self, message: str) -> dict[str, object] | None:
+        """Electron'dan gelen komutu dogrulamadan once zarfdan cikarir."""
+        try:
+            envelope = json.loads(message)
+        except json.JSONDecodeError:
+            print("[Command] Rejected unsigned message", flush=True)
+            return None
+
+        payload = envelope.get("payload") if isinstance(envelope, dict) else None
+        signature = envelope.get("sig") if isinstance(envelope, dict) else None
+        version = envelope.get("v") if isinstance(envelope, dict) else None
+        timestamp_ms = envelope.get("ts") if isinstance(envelope, dict) else None
+        if version != 1 or not isinstance(payload, str) or not isinstance(signature, str):
+            print("[Command] Rejected malformed signed command", flush=True)
+            return None
+
+        if not isinstance(timestamp_ms, int) or isinstance(timestamp_ms, bool):
+            print("[Command] Rejected malformed signed command timestamp", flush=True)
+            return None
+
+        if self._zmq_auth_token is None:
+            print("[Command] Rejected command because auth token missing", flush=True)
+            return None
+
+        expected_signature = hmac.new(
+            self._zmq_auth_token.encode("utf-8"),
+            f"{timestamp_ms}.{payload}".encode(),
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(signature, expected_signature):
+            print("[Command] Rejected command signature", flush=True)
+            return None
+
+        now_ms = int(time.time() * 1000)
+        if abs(now_ms - timestamp_ms) > 15_000:
+            print("[Command] Rejected signed command outside replay window", flush=True)
+            return None
+        if self._last_signed_command_time_ms is not None and timestamp_ms <= self._last_signed_command_time_ms:
+            print("[Command] Rejected replayed signed command", flush=True)
+            return None
+        self._last_signed_command_time_ms = timestamp_ms
+
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            print("[Command] Rejected signed command with invalid payload", flush=True)
+            return None
+
+        return data if isinstance(data, dict) else None
+
     def _command_loop(self):
         """Listen for commands/config updates from Electron"""
         print("[Command] Listener started")
@@ -1059,7 +1152,9 @@ class SubtitleEngine:
                 if self._command_socket.poll(timeout=500):
                     msg = self._command_socket.recv_string()
                     try:
-                        data = json.loads(msg)
+                        data = self._verify_signed_message(msg)
+                        if data is None:
+                            continue
                         if data.get("type") == "config":
                             key = data.get("key")
                             value = data.get("value")
@@ -1133,6 +1228,8 @@ class SubtitleEngine:
                             break
                     except json.JSONDecodeError:
                         pass
+                    if data.get("type") == "shutdown":
+                        break
 
             except Exception as e:
                 print(f"[Command] Error: {e}")

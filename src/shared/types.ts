@@ -77,6 +77,7 @@ export interface ApiSettingsSaveResult {
 export interface SetupConfig {
     isSetupComplete: boolean;
     setupComplete?: boolean; // legacy alias
+    hasCloudProvider?: boolean;
     language?: 'en' | 'fi' | 'tr';
     engineType?: 'local' | 'cloud';
     wordByWord?: boolean;

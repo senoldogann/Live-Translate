@@ -104,7 +104,8 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
             azureSpeechKey: "",
             azureSpeechRegion: "",
             deepgramKey: "",
-            deeplKey: ""
+            deeplKey: "",
+            hasCloudProvider: false
         };
         // Save to native config
         await window.electronAPI?.saveConfig(config);

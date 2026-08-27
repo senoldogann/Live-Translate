@@ -34,7 +34,7 @@ graph TB
     end
 
     Main -->|Spawns| Engine
-    Engine -->|ZMQ TCP:5555| Main
+    Engine -->|ZMQ IPC/HMAC| Main
     Main -->|Electron IPC| App
     App -->|Events| Main
 ```
@@ -72,8 +72,9 @@ Standart `stdio` (stdin/stdout) iletişimi yüksek frekanslı ses verisi akış�
 
 ### Protocol
 *   **Pattern:** Publisher-Subscriber (PUB/SUB)
-*   **Transcript Port:** `tcp://127.0.0.1:5555`
-*   **Command Port:** `tcp://127.0.0.1:5556`
+*   **macOS Transport:** Her Electron oturumu için ayrı Unix-domain socket çifti (`ipc:///...`).
+*   **Fallback Transport:** macOS olmayan platformlarda `tcp://127.0.0.1:5555/5556`.
+*   **Integrity:** Zarflar `v:1`, payload, `ts` ve HMAC-SHA256 imzası taşir; iki taraf da zaman ve tekrar kontrolu yapar.
 *   **Format:**
     ```text
     [TRANSCRIPT] {"original": "Hello", "translated": "Merhaba", "is_final": false}

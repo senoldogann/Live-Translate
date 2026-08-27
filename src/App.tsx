@@ -83,9 +83,7 @@ function App() {
     // Setup Wizard State
     const [isSetupComplete, setIsSetupComplete] = useState<boolean | null>(null);
     const [isHistoryWindowOpen, setIsHistoryWindowOpen] = useState(false);
-    const [azureSpeechKey, setAzureSpeechKey] = useState("");
-    const [azureSpeechRegion, setAzureSpeechRegion] = useState("");
-    const [deepgramKey, setDeepgramKey] = useState("");
+    const [hasCloudProvider, setHasCloudProvider] = useState(false);
 
     // Whether speech is currently active (controls SiriWave ↔ Subtitle toggle)
     const [isSpeechActive, setIsSpeechActive] = useState(false);
@@ -113,9 +111,9 @@ function App() {
                     if (typeof config.wordByWord === 'boolean') {
                         setIsWordByWord(config.wordByWord);
                     }
-                    if (config.azureSpeechKey) setAzureSpeechKey(config.azureSpeechKey);
-                    if (config.azureSpeechRegion) setAzureSpeechRegion(config.azureSpeechRegion);
-                    if (config.deepgramKey) setDeepgramKey(config.deepgramKey);
+                    if (typeof config.hasCloudProvider === 'boolean') {
+                        setHasCloudProvider(config.hasCloudProvider);
+                    }
                 } else {
                     setIsSetupComplete(false);
                 }
@@ -143,7 +141,10 @@ function App() {
                 ...patch,
             });
 
-            return Boolean(saved);
+            if (!saved) {
+                throw new Error('Yapilandirma kaydedilemedi.');
+            }
+            return true;
         } catch (error) {
             console.warn('[App] Failed to persist config patch', error);
             return false;
@@ -266,14 +267,8 @@ function App() {
         });
 
         const unsubscribeApiSettings = window.electronAPI.onApiSettingsUpdated?.((config: SetupConfig) => {
-            if (config.azureSpeechKey !== undefined) {
-                setAzureSpeechKey(config.azureSpeechKey);
-            }
-            if (config.azureSpeechRegion !== undefined) {
-                setAzureSpeechRegion(config.azureSpeechRegion);
-            }
-            if (config.deepgramKey !== undefined) {
-                setDeepgramKey(config.deepgramKey);
+            if (typeof config.hasCloudProvider === 'boolean') {
+                setHasCloudProvider(config.hasCloudProvider);
             }
             if (config.engineType) {
                 setEngineType(config.engineType);
@@ -427,17 +422,14 @@ function App() {
     }, [isWordByWord, persistConfigPatch]);
 
     const handleEngineTypeChange = useCallback((type: 'local' | 'cloud') => {
-        const hasAzure = Boolean(azureSpeechKey && azureSpeechRegion);
-        const hasFallback = Boolean(deepgramKey);
-
-        if (type === 'cloud' && !hasAzure && !hasFallback) {
+        if (type === 'cloud' && !hasCloudProvider) {
             openApiSettingsWindow();
             return;
         }
         setEngineType(type);
         window.electronAPI?.setEngineType(type);
         void persistConfigPatch({ engineType: type });
-    }, [azureSpeechKey, azureSpeechRegion, deepgramKey, openApiSettingsWindow, persistConfigPatch]);
+    }, [hasCloudProvider, openApiSettingsWindow, persistConfigPatch]);
 
     // ─── Refs for interactive zones ──────────────────────────────────────────
     const bottomSectionRef = useRef<HTMLDivElement>(null);
@@ -498,6 +490,9 @@ function App() {
             }
             if (config.engineType) {
                 setEngineType(config.engineType);
+            }
+            if (typeof config.hasCloudProvider === 'boolean') {
+                setHasCloudProvider(config.hasCloudProvider);
             }
             window.electronAPI?.restartEngine();
         }} />;
