@@ -1,51 +1,49 @@
-# Contributing to Stealth Subtitle Translator
+# Contributing
 
-Thanks for taking the time to contribute! 🎉
+Thanks for taking the time to contribute.
 
-This guide explains how to get involved and what we expect from contributors.
+## Code of Conduct
 
-## 🤝 Code of Conduct
+Be respectful and professional in all interactions. Discrimination, harassment, or toxic
+behavior is not tolerated.
 
-Please be respectful and professional in all interactions. We have zero tolerance for discrimination, harassment, or toxic behavior.
+## Development Workflow
 
-## 🛠️ Development Workflow
+1. **Fork & clone** the repository.
+2. **Create a branch** for each change: `feature/...`, `fix/...`, or `chore/...`.
+3. **Install dependencies:**
 
-1.  **Fork & Clone:** Fork the project to your account and clone it locally.
-2.  **Branching:** Create a new branch for each feature or bug fix.
-    *   `feature/amazing-feature`
-    *   `fix/critical-bug`
-    *   `chore/cleanup`
-3.  **Dependencies:**
-    ```bash
-    npm run python:install
-    ```
-4.  **Environment:**
-    *   Cloud testing için uygulama içindeki `API Ayarlari` ekranından `Azure Speech Key` + `Region` gir.
-    *   `Deepgram` ve `DeepL` tamamen isteğe bağlıdır; fallback / kalite katmanı olarak kullanılabilir.
-5.  **Coding:**
-    *   **TypeScript:** Strict mode is active. Avoid using `any`.
-    *   **React:** Use functional components and Hooks.
-    *   **Style:** Adhere to the Glassmorphism design language.
+   ```bash
+   npm install
+   npm run python:install   # sets up the Python environment
+   ```
 
-## ✅ Pull Request (PR) Checklist
+4. **Environment:** For cloud testing, enter your Azure Speech key + region (and optionally
+   Deepgram / DeepL) in the in-app *API Settings* window. Deepgram and DeepL are optional —
+   they act as fallback / quality layers.
 
-Before opening a PR, please ensure you have completed the following steps:
+5. **Coding conventions:**
+   - TypeScript: strict mode is active — avoid `any`.
+   - React: functional components and hooks.
+   - Python: keep `ruff` happy (`ruff check` and `ruff format --check` in `python/`).
+   - Style: follow the existing glassmorphism design language.
 
-- [ ] **Unit Tests:** Does `npm test -- --run` pass? (Did you write tests for new features?)
-- [ ] **Build:** Does `npm run build` pass?
-- [ ] **Verification:** Did you run the available local quality checks for your environment?
-- [ ] **Documentation:** Does `README.md` or `ARCHITECTURE.md` need updating?
-- [ ] **Commit Messages:** Do they follow the Conventional Commits standard? (e.g., `feat: add new streaming mode toggler`)
+## Pull Request Checklist
 
-## 🐛 Bug Reporting
+Before opening a PR:
 
-If you found a bug, please open a new issue in the Issues section and include:
+- [ ] `npm test -- --run` passes (add tests for new features).
+- [ ] `npm run build` passes.
+- [ ] `npx tsc --noEmit` passes.
+- [ ] `ruff check` and `ruff format --check` pass for Python changes.
+- [ ] Update `README.md` or `ARCHITECTURE.md` if the change affects them.
+- [ ] Use clear, conventional commit messages (e.g. `feat: add streaming mode toggler`).
 
-1.  **Description:** What happened?
-2.  **Expected Behavior:** What should have happened?
-3.  **Steps to Reproduce:** How can we replicate the bug?
-4.  **Logs:** Terminal output or screenshots.
+## Bug Reporting
 
----
+Open an issue in the Issues section and include:
 
-Thank you for making the project better with your contributions! 🚀
+1. What happened.
+2. What you expected to happen.
+3. Steps to reproduce.
+4. Logs or screenshots (the app can export logs via the UI).
