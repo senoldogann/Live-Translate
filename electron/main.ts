@@ -7,6 +7,7 @@
  */
 
 import { app, BrowserWindow, ipcMain, screen, globalShortcut, shell } from 'electron';
+import type { WebPreferences } from 'electron';
 import { spawn, ChildProcess, exec } from 'child_process';
 import path from 'path';
 import fs from 'fs';
@@ -28,6 +29,40 @@ const __dirname = path.dirname(__filename);
 
 // ZeroMQ import (dynamic to handle native module)
 let zmq: typeof import('zeromq') | null = null;
+
+// Pencereler arasinda tekrarlanan Electron guvenlik ayarlari tek kaynaktan uretilir.
+const WINDOW_SECURITY_BASE = {
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: true,
+} as const;
+
+function getPrimaryWebPreferences(): WebPreferences {
+    return {
+        ...WINDOW_SECURITY_BASE,
+        preload: getPreloadPath(),
+        webSecurity: !isDev,
+    };
+}
+
+function getSecondaryWebPreferences(): WebPreferences {
+    return {
+        ...WINDOW_SECURITY_BASE,
+        preload: getPreloadPath(),
+    };
+}
+
+function configureWindowLifecycle(win: BrowserWindow): void {
+    win.webContents.setWindowOpenHandler(({ url }) => {
+        console.warn('[Main] Blocked popup navigation:', url);
+        return { action: 'deny' };
+    });
+
+    win.webContents.on('will-navigate', (event, url) => {
+        event.preventDefault();
+        console.warn('[Main] Blocked unexpected navigation:', url);
+    });
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TYPE DEFINITIONS
@@ -1379,16 +1414,12 @@ function createUtilityWindow(options: {
         title: options.title,
         backgroundColor: options.backgroundColor ?? '#09090b',
         autoHideMenuBar: true,
-        webPreferences: {
-            preload: getPreloadPath(),
-            contextIsolation: true,
-            nodeIntegration: false,
-            sandbox: false,
-        },
+        webPreferences: getSecondaryWebPreferences(),
     });
 
     // Apply global stealth state
     win.setContentProtection(isStealthModeMain);
+    configureWindowLifecycle(win);
 
     return win;
 }
@@ -1509,17 +1540,12 @@ function createStealthWindow(): BrowserWindow {
         hasShadow: false,
         focusable: true,
         skipTaskbar: true,
-        webPreferences: {
-            preload: preloadPath,
-            contextIsolation: true,
-            nodeIntegration: false,
-            sandbox: false,
-            webSecurity: !isDev,
-        },
+        webPreferences: getPrimaryWebPreferences(),
     });
 
     // Match the current global stealth state
     win.setContentProtection(isStealthModeMain);
+    configureWindowLifecycle(win);
 
     // Visible on all Spaces and full-screen apps
     if (process.platform === 'darwin') {
@@ -2325,16 +2351,12 @@ function setupIpcHandlers(): void {
             title: 'Transcript History',
             backgroundColor: '#09090b',
             autoHideMenuBar: true,
-            webPreferences: {
-                preload: getPreloadPath(),
-                contextIsolation: true,
-                nodeIntegration: false,
-                sandbox: false,
-            },
+            webPreferences: getSecondaryWebPreferences(),
         });
 
         // Apply global stealth state
         historyWindow.setContentProtection(isStealthModeMain);
+        configureWindowLifecycle(historyWindow);
 
         historyWindow.webContents.on('did-finish-load', () => {
             pushHistoryDataToWindow();
