@@ -38,7 +38,7 @@ First launch notes:
 
 Fast checks after launch:
 - `Bulut` mode + valid Azure key = Azure Speech real-time translation path.
-- Console logs show the active provider per subtitle: `azure-speech`, `deepl`, `google`, `argos`, `fast-argos`, or `passthrough`.
+- Console logs show the active provider per subtitle: `azure-speech`, `deepl`, `argos`, `fast-argos`, or `passthrough`.
 
 ---
 
@@ -53,7 +53,7 @@ Uses macOS's native content-protection hook to make the overlay window invisible
 ### ⚡ Hybrid AI Architecture
 - **Local transcription:** [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (`small` model) with `int8` quantization — optimised for Apple Silicon.
 - **Cloud path:** Azure Speech Translation (primary) → Deepgram (fallback, optional).
-- **Translation fallback chain:** DeepL API → Google Translate → Argos (local/fallback path).
+- **Optional local translation:** DeepL API improves local-mode quality; without it, recognized text is passed through untranslated.
 - **Anti-hallucination:** 3-gram loop detection filter + temperature fallback.
 - **IPC:** ZeroMQ (ZMQ) for <5ms latency between Python engine and Electron.
 
@@ -76,8 +76,6 @@ graph TD
     PyEngine -->|local| Whisper["faster-whisper (small)"]
     Whisper -->|text| TranslationChain{"Local Translation Chain"}
     TranslationChain -->|"Tier 1"| DeepL["DeepL API"]
-    TranslationChain -->|"Tier 2"| Google["Google Translate"]
-    TranslationChain -->|"Tier 3 (offline)"| Argos["Argos Translate"]
     Azure -->|translated text| Electron["Electron Main"]
     Deepgram -->|translated text| Electron
     TranslationChain -->|ZMQ TCP:5555| Electron

@@ -51,9 +51,7 @@ Tüm yapay zeka işlemleri `python/engine.py` içinde, Electron ana sürecinden 
 *   **Local STT Engine:** `faster-whisper` (CTranslate2 backend). `small` model varsayılan olarak seçilmiştir. Apple Silicon üzerinde `int8` quantization ile çalışır.
 *   **VAD (Voice Activity Detection):** `webrtcvad`. Sessizlik eşiği 400ms'ye indirilerek daha tepkisel hale getirilmiştir.
 *   **Translation Layer:**
-    *   *Tier 1 (Premium):* DeepL API. Yerel modda veya fallback akışta daha iyi kalite için önceliklidir.
-    *   *Tier 2 (Standard):* Google Translate. DeepL kotası biterse veya hata verirse devreye girer.
-    *   *Tier 3 (Offline):* Argos Translate. İnternet kesilirse son çare olarak çalışır.
+    *   *Tier 1 (Premium):* DeepL API. Yerel modda daha iyi kalite sağlar; kullanilamazsa metin passthrough olarak yayinlanir.
 *   **Logic Controllers:**
     *   *Anti-Loop Filter:* Whisper'ın halüsinasyonlarını (sonsuz döngüleri) tespit edip temizleyen 3-gram filtresi.
     *   *Latency Optimizer:* Buffer sürelerini dinamik yöneterek (Max 5s) gecikmeyi minimize eder.
