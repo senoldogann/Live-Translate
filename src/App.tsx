@@ -69,7 +69,7 @@ function App() {
     const [allTranscripts, setAllTranscripts] = useState<SubtitleEntry[]>([]);
     const [showControlBar, setShowControlBar] = useState(true);
     const [isListening, setIsListening] = useState(true);
-    const [isStreaming, setIsStreaming] = useState(false);
+    const [isStreaming, setIsStreaming] = useState(true);
     const [isWordByWord, setIsWordByWord] = useState(true);
     // false = normal (content visible); true = stealth (content zone hidden)
     const [isStealthMode, setIsStealthMode] = useState(false);

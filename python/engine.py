@@ -83,8 +83,8 @@ class EngineConfig:
     # Audio device
     audio_device: str | None = "BlackHole 2ch"  # None for default
 
-    # Streaming setting
-    streaming_mode: bool = False
+    # Streaming setting (partial subtitles shown live, then finalized)
+    streaming_mode: bool = True
 
     # Engine Settings
     engine_type: str = "local"  # "local" or "cloud"
@@ -159,6 +159,11 @@ class TranscriptResult:
     confidence: float = 0.0
     source: str = "local"
     translationProvider: str = "passthrough"
+
+
+def _ends_with_sentence_punctuation(text: str) -> bool:
+    """True if the text ends with a sentence-final punctuation mark."""
+    return bool(text) and text[-1] in ".!?…"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -747,6 +752,20 @@ class TranslationEngine:
         )
 
         if fast_mode:
+            # Partial alt yazılar için önce hızlı DeepL (latency_optimized) denenir;
+            # Argos sadece fallback'tir çünkü çeviri kalitesi belirgin şekilde düşüktür.
+            if self.source_lang.lower() != "fi":
+                result = self.deepl_translator.translate(
+                    protected_text,
+                    context=protected_context,
+                    model_type="latency_optimized",
+                )
+                if result:
+                    result = self._restore_terms(result, replacements)
+                    if result.strip().lower() != text_stripped.lower():
+                        self.last_provider = "deepl-fast"
+                        return result
+
             if self.translator:
                 try:
                     result = self.translator.translate(protected_text)
@@ -931,8 +950,9 @@ class SubtitleEngine:
         self._azure_speech = AzureSpeechTranslationClient(None)
         self._listening_epoch = 0
 
-        # Cümle biriktirme sistemi
-        self._sentence_buffer: list = []  # Biriken cümleler
+        # Cümle biriktirme sistemi: timeout kesintisinde yarım kalan
+        # cümle parçaları burada birikir, cümle tamamlanınca birleştirilir.
+        self._sentence_buffer: list[str] = []
         self._silence_threshold = 0.35  # Faster finalize for real-time subtitles
         self._current_speech_audio: list = []  # Şu anki konuşma sesi
         self._audio_lock = threading.Lock()  # Thread safety lock
@@ -1245,9 +1265,10 @@ class SubtitleEngine:
         last_partial_text = ""
         last_context = ""  # Hafıza (Önceki cümle)
 
-        # Maksimum segment süresi (saniye) - Çok uzarsa kesip yeni satıra geçsin
-        # Maksimum segment süresi (saniye) - Çok uzarsa kesip yeni satıra geçsin
-        MAX_SEGMENT_DURATION = 3.0
+        # Maksimum segment süresi (saniye). Uzun konuşmalarda cümle ortası
+        # kesilmesin diye yüksek tutulur; yine de kesilirse parça bir sonraki
+        # transkripsiyonla birleştirilir (bkz. _sentence_buffer).
+        MAX_SEGMENT_DURATION = 6.0
 
         while self._running:
             # Wait for event
@@ -1334,7 +1355,32 @@ class SubtitleEngine:
                     )
                     with self._audio_lock:
                         self._current_speech_audio.clear()
+                    self._sentence_buffer.clear()
                 continue
+
+            # 5.6. Sentence integrity: if a max-duration cut landed mid-sentence,
+            # keep the fragment and merge it with the next transcription instead of
+            # showing a broken half-sentence as final.
+            if is_final and is_timeout_final and not _ends_with_sentence_punctuation(text):
+                if len(self._sentence_buffer) < 5:
+                    self._sentence_buffer.append(text)
+                else:
+                    # Güvenlik sınırı: çok uzun tek parça olmasın, yine de yayınla
+                    self._sentence_buffer.clear()
+                    self._sentence_buffer.append(text)
+                with self._audio_lock:
+                    if processing_epoch == self._listening_epoch:
+                        del self._current_speech_audio[:processed_count]
+                    else:
+                        self._current_speech_audio.clear()
+                last_partial_text = text
+                self._last_transcript_time = now
+                continue
+
+            if is_final and self._sentence_buffer:
+                # Birikmiş yarım cümle parçaları tam cümleyle birleştirilir
+                text = " ".join([*self._sentence_buffer, text]).strip()
+                self._sentence_buffer.clear()
 
             # 6. Translate (language matched)
             translated = self.translator.translate(
