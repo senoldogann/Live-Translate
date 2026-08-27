@@ -19,7 +19,6 @@ class TranslationTermProtectionTests(unittest.TestCase):
             return f"CEVIRI {text}"
 
         engine.deepl_translator.translate = fake_deepl_translate
-        engine.google_translator.translate = lambda text: f"GOOGLE {text}"
 
         result = engine.translate(
             "AWS Lambda works with the OpenAI API",

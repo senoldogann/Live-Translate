@@ -39,7 +39,6 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 
 import numpy as np
 import zmq
-from deep_translator import GoogleTranslator
 
 # Lazy imports for faster startup
 _whisper_model = None
@@ -524,7 +523,7 @@ class DeepLTranslator:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TRANSLATION ENGINE (DeepL → Google → Argos)
+# TRANSLATION ENGINE (DeepL → Argos)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
@@ -532,8 +531,7 @@ class TranslationEngine:
     """
     Hybrid Translation Engine with priority:
     1. DeepL API (Highest quality, Finnish supported)
-    2. Google Translate (Fallback, good quality)
-    3. Argos Offline (Last resort, lower quality)
+    2. Argos Offline (Last resort, lower quality)
     """
 
     def __init__(self, source_lang: str = "en", target_lang: str = "tr"):
@@ -547,7 +545,6 @@ class TranslationEngine:
 
         # Initialize translators
         self.deepl_translator = DeepLTranslator(source_lang=source_lang, target_lang=target_lang)
-        self.google_translator = GoogleTranslator(source=source_lang, target=target_lang)
 
     def load(self):
         """Load translation models"""
@@ -714,7 +711,7 @@ class TranslationEngine:
         context: str = "",
         prefer_quality: bool = True,
     ) -> str:
-        """Translate text with fallback chain: DeepL -> Google -> Argos"""
+        """Translate text with fallback chain: DeepL -> Argos"""
         if not text or not text.strip():
             self.last_provider = "passthrough"
             return ""
@@ -737,7 +734,7 @@ class TranslationEngine:
             self.last_provider = "passthrough"
             return text
 
-        # 1. Try DeepL (Highest Quality) - Skip for Finnish (User request: better quality on Google)
+        # 1. Try DeepL (Highest Quality) - Skip Finnish source to avoid unstable provider results
         if self.source_lang.lower() != "fi":
             result = self.deepl_translator.translate(
                 protected_text,
@@ -752,22 +749,11 @@ class TranslationEngine:
                     self.last_provider = "deepl"
                     return result
                 else:
-                    print("[DeepL] Same text returned, falling back to Google...")
+                    print("[DeepL] Same text returned, falling back to offline translation...")
         else:
             print("[DeepL] Skipping for Finnish (source='fi')")
 
-        # 2. Try Google Translate (Fallback)
-        try:
-            result = self.google_translator.translate(protected_text)
-            if result:
-                result = self._restore_terms(result, replacements)
-                print("[Google] Translated successfully")
-                self.last_provider = "google"
-                return result
-        except Exception as e:
-            print(f"[Google] Error: {e}")
-
-        # 3. Fallback to Argos (Offline)
+        # 2. Fallback to Argos (Offline)
         if not self._installed:
             self.load()
 
@@ -795,7 +781,6 @@ class TranslationEngine:
 
         # Reinitialize translators with new source language
         self.deepl_translator = DeepLTranslator(source_lang=new_source_lang, target_lang=self.target_lang)
-        self.google_translator = GoogleTranslator(source=new_source_lang, target=self.target_lang)
         self._protected_terms = self._build_protected_terms(new_source_lang)
         self.translator = None
         self._installed = False
