@@ -3,7 +3,7 @@
 
 # ── Core AI ──────────────────────────────────────────────────────────────────
 # Faster-Whisper: CTranslate2-optimised Whisper implementation
-faster-whisper>=1.0.0
+faster-whisper>=1.2.1
 
 # ── Audio ─────────────────────────────────────────────────────────────────────
 # sounddevice: Modern audio I/O via PortAudio
