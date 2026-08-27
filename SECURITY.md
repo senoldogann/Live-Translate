@@ -31,7 +31,7 @@ If you discover a security vulnerability in Stealth Subtitle Translator, please 
 ### Electron Hardening
 - **Context Isolation**: Enabled — renderer has no direct Node.js access.
 - **Node Integration**: Disabled — all IPC goes through the preload bridge.
-- **Sandbox**: Enabled in production.
+- **Sandbox**: Enabled for the overlay, history, API settings, and usage guide windows.
 - **Content Security Policy**: Applied to all secondary windows.
 - **`webSecurity`**: Enabled in production builds.
 - **`shell.openExternal`**: URL whitelist enforced — only known domains allowed.

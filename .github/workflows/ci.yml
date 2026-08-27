@@ -27,7 +27,6 @@ jobs:
 
       - name: TypeScript type check
         run: npx tsc --noEmit
-        continue-on-error: true
 
       - name: Run tests
         run: npm test -- --run --reporter=verbose
@@ -54,7 +53,7 @@ jobs:
         run: npm ci
 
       - name: NPM Audit (Critical & High only)
-        run: npm audit --audit-level=high || true
+        run: npm audit --audit-level=high
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -64,7 +63,7 @@ jobs:
       - name: Python dependency audit
         run: |
           pip install pip-audit
-          pip-audit -r python/requirements.txt || true
+          pip-audit -r python/requirements.txt
 
   python-lint:
     name: Python Lint
@@ -84,7 +83,7 @@ jobs:
         run: pip install ruff
 
       - name: Run Ruff linter
-        run: ruff check python/ --output-format=github || true
+        run: ruff check --config python/pyproject.toml python --output-format=github
 
       - name: Run Ruff formatter check
-        run: ruff format --check python/ || true
+        run: ruff format --check --config python/pyproject.toml python
