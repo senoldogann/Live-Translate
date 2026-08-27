@@ -72,6 +72,7 @@
             "target": [
                 "dmg"
             ],
+            "artifactName": "Stealth-Subtitle-Translator-${version}-${arch}.${ext}",
             "hardenedRuntime": true,
             "gatekeeperAssess": false,
             "entitlements": "build/entitlements.mac.plist",
