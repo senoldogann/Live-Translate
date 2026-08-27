@@ -1,175 +1,119 @@
 # Stealth Subtitle Translator
 
+> Real-time AI transcription + translation for macOS — **invisible to screen sharing** in Stealth mode.
 
-İstediğiniz arka planda çalıştırma özelliğini ekledim ve sistem performansına dair analizi tamamladım.
+[![Version](https://img.shields.io/badge/version-1.0.0-blue?style=for-the-badge)](https://github.com/senoldogann/Live-Translate/releases)
+[![Platform](https://img.shields.io/badge/platform-macOS%20Silicon-black?style=for-the-badge&logo=apple)](https://github.com/senoldogann/Live-Translate)
+[![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/senoldogann/live-translate/ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/senoldogann/Live-Translate/actions)
 
-Yeni Scriptler: Uygulamayı bash scripts/launch_bg.sh ile arka planda başlatabilir, bash scripts/stop_app.sh ile durdurabilirsiniz.
-Performans: "Bulut" (Azure) modunda sistem neredeyse hiç yorulmaz. "Yerel" modda (Whisper) ise Apple Silicon işlemcilerde %15-40 arası CPU kullanır ancak bu günlük kullanımı etkilemez.
-Detaylı kullanım rehberi ve performans tablosunu hazırladığım raporda bulabilirsiniz.
+Stealth Subtitle Translator adds **live subtitles with translation** on top of your screen while you watch meetings, movies, or streams. When **Stealth mode** is enabled, the overlay is invisible to screen-capture tools (Zoom, Teams, OBS, QuickTime) — your audience sees a clean desktop, you see the subtitles.
 
-
-
-> **Real-time AI transcription + translation — invisible to screen sharing**
-
-![Version](https://img.shields.io/badge/version-1.0.0-blue?style=for-the-badge)
-![Platform](https://img.shields.io/badge/platform-macOS%20Silicon-black?style=for-the-badge&logo=apple)
-![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
-![CI](https://img.shields.io/github/actions/workflow/status/senoldogann/live-translate/ci.yml?branch=main&style=for-the-badge&label=CI)
-
-**Stealth Subtitle Translator** is a privacy-first live subtitle overlay for macOS. It uses AI to transcribe audio in real-time and translates it on-device or via cloud APIs — all while remaining **invisible to screen sharing tools when Stealth mode is enabled** (Zoom, Teams, OBS, QuickTime).
-
-Created and maintained by **Senol Dogan**.
-
----
-
-## Quick Start
-
-```bash
-git clone https://github.com/senoldogann/live-translate.git
-cd live-translate
-npm run oss:start
-```
-
-First launch notes:
-- Install [BlackHole 2ch](https://existential.audio/blackhole/) before starting the app.
-- Open `API Ayarlari` inside the app and paste your **Azure Speech** key + region there.
-- `Deepgram` is optional fallback. `DeepL` is optional extra translation quality / fallback.
-- On first run, the launcher bootstraps `node_modules` and `python/.venv` automatically.
-
-Fast checks after launch:
-- `Bulut` mode + valid Azure key = Azure Speech real-time translation path.
-- Console logs show the active provider per subtitle: `azure-speech`, `deepl`, `argos`, `fast-argos`, or `passthrough`.
+Privacy-first: in **Local mode**, audio never leaves your machine.
 
 ---
 
 ## ✨ Features
 
 ### 🛡️ Ghost-Level Invisibility
-Uses macOS's native content-protection hook to make the overlay window invisible to screen capture engines while Stealth mode is enabled.
+- Overlay window hidden from screen capture engines while Stealth mode is on
+- Great for meetings, presentations, and streaming
 
-- **Meeting privacy:** Follow live translations during a presentation — attendees only see your screen.
-- **Streamers:** Read chat or notes while streaming; your audience sees a clean desktop.
+### ⚡ Hybrid AI Engine
+- **Local STT:** [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (`small` model, int8, Apple Silicon optimized) — selectable size: tiny / base / small / medium
+- **Cloud STT:** Azure Speech Translation (primary), Deepgram (optional fallback)
+- **Translation:** DeepL API (optional, best quality) → Google → offline Argos fallback
+- **Anti-hallucination:** 3-gram loop filter + temperature fallback
+- **Low-latency IPC:** ZeroMQ with HMAC-signed messages between Python and Electron
 
-### ⚡ Hybrid AI Architecture
-- **Local transcription:** [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (`small` model) with `int8` quantization — optimised for Apple Silicon.
-- **Cloud path:** Azure Speech Translation (primary) → Deepgram (fallback, optional).
-- **Optional local translation:** DeepL API improves local-mode quality; without it, recognized text is passed through untranslated.
-- **Anti-hallucination:** 3-gram loop detection filter + temperature fallback.
-- **IPC:** ZeroMQ (ZMQ) for <5ms latency between Python engine and Electron.
-
-### 💎 UI / UX
-- Glassmorphism overlay — SiriWave animation when silent, subtitles when speaking.
-- Click-through: click anywhere outside the subtitles and it passes through to the app behind.
-- Draggable control bar with opacity, font size, language, and streaming mode controls.
+### 💎 UX
+- Glassmorphism overlay with SiriWave animation when silent
+- Click-through: clicks outside the subtitle pass to the app behind
+- Draggable control bar (opacity, font size, language, streaming mode)
+- Transcript history window
 
 ---
 
-## 🗺️ Architecture
+## 🚀 Quick Start (from source)
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for a full technical deep dive.
-
-```mermaid
-graph TD
-    Audio["System Audio (BlackHole)"] -->|sounddevice| PyEngine["Python AI Engine"]
-    PyEngine -->|cloud| Azure["Azure Speech Translation"]
-    PyEngine -->|fallback cloud| Deepgram["Deepgram"]
-    PyEngine -->|local| Whisper["faster-whisper (small)"]
-    Whisper -->|text| TranslationChain{"Local Translation Chain"}
-    TranslationChain -->|"Tier 1"| DeepL["DeepL API"]
-    Azure -->|translated text| Electron["Electron Main"]
-    Deepgram -->|translated text| Electron
-    TranslationChain -->|ZMQ IPC/HMAC| Electron
-    Electron -->|IPC| React["React Renderer (UI)"]
+```bash
+git clone https://github.com/senoldogann/Live-Translate.git
+cd Live-Translate
+npm run oss:start
 ```
 
----
-
-## 🚀 Getting Started
+The launcher bootstraps `node_modules` and the Python environment automatically.
 
 ### Prerequisites
 
 | Requirement | Notes |
 |---|---|
 | macOS Monterey 12+ | Apple Silicon (M1+) recommended |
-| Python 3.11 | `brew install python@3.11` |
-| BlackHole 2ch | Virtual audio driver — [download here](https://existential.audio/blackhole/) |
+| [BlackHole 2ch](https://existential.audio/blackhole/) | Virtual audio driver — required to capture system audio |
 | Node.js 18+ | `brew install node` |
+| Python 3.11+ | used for the AI engine |
 
-Also recommended:
-- an Azure Speech resource for the best cloud experience
-- an optional [DeepL API key](https://www.deepl.com/pro-api) for local/fallback translation quality
+### First launch
+1. Install **BlackHole 2ch** and set your system output to a **Multi-Output Device** (or BlackHole directly) in *System Settings → Sound*.
+2. Grant **microphone access** when macOS asks (needed to read system audio).
+3. In **Local mode** the Whisper model auto-downloads on first use (stay online).
 
-### Installation
+For the best cloud experience, add your **Azure Speech** key (and optionally **DeepL**) under *API Ayarları*.
 
-```bash
-# 1. Clone the repo
-git clone https://github.com/senoldogann/live-translate.git
-cd live-translate
+---
 
-# 2. One-command bootstrap for open-source use
-npm run oss:start
-```
+## 📦 Install from DMG (release)
 
-The launcher will:
-- install missing Node.js dependencies
-- create `python/.venv` if needed
-- install Python dependencies from `python/requirements.txt`
-- start the Electron app
+Download the latest DMG from the [Releases](https://github.com/senoldogann/Live-Translate/releases) page, open it, and drag the app into *Applications*. The app auto-updates when a new release is published.
 
-If you only want to prepare dependencies without launching the app:
-
-```bash
-npm run python:install
-```
-
-### Run
-
-```bash
-npm run oss:start
-```
-
-The Electron app will launch and spawn the Python AI engine automatically. For day-to-day open-source usage, this is the preferred command instead of building a DMG.
+**First-time user?** Follow the simple [Installation Guide](docs/INSTALL.md) — no terminal needed (also available in Türkçe).
 
 ---
 
 ## 🎮 Control Bar
 
-| Button | Feature | Description |
-|:--|:--|:--|
-| 🟢 | **Status** | Green = listening, dim = paused |
-| 🎤 | **Listen** | Start / pause transcription |
-| ≡ | **Streaming mode** | Word-by-word (fast) vs sentence-at-a-time (stable) |
-| 🛡️ | **Stealth** | Toggle screen-capture invisibility |
-| 👁️ | **Source text** | Show / hide the original language text |
-| 🌐 | **Language** | Source language selector (EN / FI) |
-| 🔄 | **Restart** | Restart the AI engine if it becomes unresponsive |
-| 📜 | **History** | View timestamped transcript log |
-| ▼ | **Hide bar** | Collapse the control bar |
-| ✕ | **Quit** | Exit the application |
+| Button | Feature |
+|:--|:--|
+| 🟢 | Status (green = listening) |
+| 🎤 | Start / pause listening |
+| ≡ | Streaming mode (word-by-word vs sentence) |
+| 🛡️ | Stealth (screen-capture invisibility) |
+| 👁️ | Show / hide source text |
+| 🌐 | Source language |
+| 🔄 | Restart AI engine |
+| 📜 | Transcript history |
+| ✕ | Quit |
 
 ---
 
 ## 🧪 Development
 
 ```bash
-# Run unit tests (Vitest)
-npm test
-
-# Build production bundle
-npm run electron:build
+npm test                # unit tests (Vitest)
+npm run test:e2e        # Electron smoke test (Playwright)
+npm run electron:build  # production DMG (signed with Developer ID)
+bash scripts/notarize.sh # notarize + staple the DMG (requires Apple credentials)
 ```
+
+Notarization can be done **without any password** using an App Store Connect API Key — see the [Notarization Guide](docs/NOTARIZATION.md).
+
+### Architecture
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for a technical deep dive, and [docs/superpowers/plans/](docs/superpowers/plans/) for engineering plans.
 
 ---
 
 ## 🔒 Security
 
-Found a vulnerability? Please read [SECURITY.md](SECURITY.md) for responsible disclosure instructions. **Do not open a public issue for security reports.**
+- API keys are encrypted with the macOS Keychain (`safeStorage`) before hitting disk.
+- ZMQ traffic is HMAC-signed and replay-protected.
+- Found a vulnerability? See [SECURITY.md](SECURITY.md) — do **not** open a public issue.
 
 ---
 
 ## ⚠️ Legal Notice
 
-This software is built for **accessibility and language learning** purposes. Unauthorized recording of conversations or violation of corporate privacy policies is the sole responsibility of the user. The "Stealth Mode" feature is intended to protect the user's own privacy, not to deceive others.
+Built for **accessibility and language learning**. Recording conversations or violating privacy policies is the sole responsibility of the user. **Stealth mode** is meant to protect your own privacy, not to deceive others.
 
 ---
 

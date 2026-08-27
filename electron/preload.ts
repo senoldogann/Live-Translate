@@ -21,6 +21,9 @@ interface ApiSettingsDraft {
     azureSpeechRegion: string;
     deepgramKey: string;
     deeplKey: string;
+    ollamaEndpoint?: string;
+    ollamaApiKey?: string;
+    ollamaModel?: string;
 }
 
 interface ApiSettingsSaveResult {
@@ -107,6 +110,13 @@ interface ElectronAPI {
     onShowControlBar: (callback: () => void) => () => void;
     onEngineReady: (callback: () => void) => () => void;
     onEngineLog: (callback: (msg: string) => void) => () => void;
+
+    // Ollama model listesi
+    fetchOllamaModels: (endpoint: string, apiKey: string) => Promise<{ ok: boolean; models?: { name: string }[]; message?: string }>;
+
+    // Transcript history
+    getHistoryDates: () => Promise<string[]>;
+    getHistoryByDate: (date: string) => Promise<unknown[]>;
 }
 
 // Expose protected methods to renderer
@@ -263,10 +273,26 @@ const electronAPI: ElectronAPI = {
     },
 
     // ═══════════════════════════════════════════════════════════════
+    // Ollama models + history
+    // ═══════════════════════════════════════════════════════════════
+    fetchOllamaModels: (endpoint: string, apiKey: string) => {
+        return ipcRenderer.invoke('fetch-ollama-models', endpoint, apiKey);
+    },
+    getHistoryDates: () => {
+        return ipcRenderer.invoke('get-history-dates');
+    },
+    getHistoryByDate: (date: string) => {
+        return ipcRenderer.invoke('get-history-by-date', date);
+    },
+
+    // ═══════════════════════════════════════════════════════════════
     // App Info
     // ═══════════════════════════════════════════════════════════════
     getAppInfo: () => {
         return ipcRenderer.invoke('get-app-info');
+    },
+    exportLogs: () => {
+        return ipcRenderer.invoke('export-logs');
     },
 
     // ═══════════════════════════════════════════════════════════════

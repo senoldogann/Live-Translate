@@ -123,6 +123,10 @@ def apply_runtime_env_overrides(config: EngineConfig) -> None:
     if source_lang in {"en", "fi", "tr"}:
         config.source_lang = source_lang
 
+    whisper_model = os.getenv("ENGINE_WHISPER_MODEL", "").strip().lower()
+    if whisper_model in {"tiny", "base", "small", "medium", "large-v3"}:
+        config.whisper_model = whisper_model
+
     engine_type = os.getenv("ENGINE_TYPE", "").strip().lower()
     if engine_type in {"local", "cloud"}:
         config.engine_type = engine_type

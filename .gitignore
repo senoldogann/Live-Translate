@@ -18,12 +18,18 @@ dist/
 dist-electron/
 out/
 build/
+# build/ klasoru ignore'lu olsa da bu iki dosya repo'da olmali (electron-builder referans verir)
+!build/icon.icns
+!build/icon.png
+!build/entitlements.mac.plist
 release/
 
 # Python
 python/__pycache__/
 python/*.pyc
 python/.venv/
+python/pysa/
+python/.requirements.synced
 .pytest_cache/
 scripts/__pycache__/
 *.egg-info/

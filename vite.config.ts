@@ -29,12 +29,15 @@ export default defineConfig({
                 vite: {
                     build: {
                         outDir: 'dist-electron',
+                        // lib:formats[cjs], esbuild `import electron`'u CommonJS `require`'a
+                        // dondurur; sandbox rendererin CJS preload istegini karsilar.
+                        lib: {
+                            entry: 'electron/preload.ts',
+                            formats: ['cjs'],
+                            fileName: () => 'preload.cjs',
+                        },
                         rollupOptions: {
                             external: ['electron'],
-                            output: {
-                                format: 'cjs',
-                                entryFileNames: '[name].js',
-                            },
                         },
                     },
                 },

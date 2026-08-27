@@ -158,6 +158,63 @@ const Icons = {
     ),
 };
 
+// ── UI i18n (ControlBar tooltip'leri) ────────────────────────────────────────
+// Yayin dili varsayilani EN; TR destegi icin language === 'tr' kullanilir.
+const UI_TEXTS = {
+    en: {
+        listening: 'Listening',
+        paused: 'Paused',
+        pause: 'Pause',
+        listen: 'Listen',
+        wordMode: 'Word-by-word mode (fast)',
+        sentenceMode: 'Sentence mode (stable)',
+        flowOn: 'Fluid typing on',
+        flowOff: 'Fluid typing off',
+        screenshot: '📷 Screenshot Mode (Make Visible)',
+        stealthBack: '🔒 Back to Stealth',
+        hideOriginal: 'Hide original text',
+        showOriginal: 'Show original text',
+        opacity: 'Opacity',
+        fontSize: 'Font size',
+        restartEngine: 'Restart engine',
+        apiSettings: 'API Settings',
+        usageGuide: 'Usage guide',
+        history: 'Transcript history',
+        hideBar: 'Hide',
+        quit: 'Quit',
+        sourceLang: 'Source language',
+        engine: 'Engine',
+        local: '💻 Local',
+        cloud: '☁️ Cloud',
+    },
+    tr: {
+        listening: 'Dinleniyor',
+        paused: 'Duraklatıldı',
+        pause: 'Durakla',
+        listen: 'Dinle',
+        wordMode: 'Kelime Kelime Modu (Hızlı)',
+        sentenceMode: 'Cümle Modu (Stabil)',
+        flowOn: 'Akıcı Yazım Açık',
+        flowOff: 'Akıcı Yazım Kapalı',
+        screenshot: '📷 Screenshot Al (Görünür Yap)',
+        stealthBack: '🔒 Gizli Moda Dön',
+        hideOriginal: 'İngilizceyi Gizle',
+        showOriginal: 'İngilizceyi Göster',
+        opacity: 'Şeffaflık',
+        fontSize: 'Yazı Boyutu',
+        restartEngine: 'Motoru Yeniden Başlat',
+        apiSettings: 'API Ayarları',
+        usageGuide: 'Kullanim Senaryolari',
+        history: 'Tüm Transcript',
+        hideBar: 'Gizle',
+        quit: 'Kapat',
+        sourceLang: 'Kaynak Dil Seçimi',
+        engine: 'Motor Seçimi',
+        local: '💻 Yerel',
+        cloud: '☁️ Bulut',
+    },
+} as const;
+
 function ControlBar({
     isListening,
     isStealthMode,
@@ -185,6 +242,7 @@ function ControlBar({
     onShowUsageGuide,
     showTooltips = true,
 }: ControlBarProps) {
+    const ui = language === 'tr' ? UI_TEXTS.tr : UI_TEXTS.en;
     const [isDragging, setIsDragging] = useState(false);
     const dragStartPos = useRef({ x: 0, y: 0 });
     const controlBarRef = useRef<HTMLDivElement>(null);
@@ -235,8 +293,8 @@ function ControlBar({
                 {/* Status indicator */}
                 <div
                     className={`status-dot tooltip ${isListening ? 'listening' : 'paused'}`}
-                    data-tooltip={isListening ? 'Dinleniyor' : 'Duraklatıldı'}
-                    aria-label={isListening ? 'Dinleniyor' : 'Duraklatıldı'}
+                    data-tooltip={isListening ? ui.listening : ui.paused}
+                    aria-label={isListening ? ui.listening : ui.paused}
                     role="status"
                 />
 
@@ -247,8 +305,8 @@ function ControlBar({
                 <button
                     className={`btn btn-icon tooltip ${isListening ? 'btn-success' : 'btn-danger'}`}
                     onClick={onToggleListening}
-                    data-tooltip={isListening ? 'Durakla' : 'Dinle'}
-                    aria-label={isListening ? 'Durakla' : 'Dinle'}
+                    data-tooltip={isListening ? ui.pause : ui.listen}
+                    aria-label={isListening ? ui.pause : ui.listen}
                 >
                     {isListening ? Icons.mic : Icons.micOff}
                 </button>
@@ -257,8 +315,8 @@ function ControlBar({
                 <button
                     className={`btn btn-icon tooltip ${isStreaming ? 'btn-success' : ''}`}
                     onClick={onToggleStreaming}
-                    data-tooltip={isStreaming ? 'Kelime Kelime Modu (Hızlı)' : 'Cümle Modu (Stabil)'}
-                    aria-label={isStreaming ? 'Kelime Kelime Modu (Hızlı)' : 'Cümle Modu (Stabil)'}
+                    data-tooltip={isStreaming ? ui.wordMode : ui.sentenceMode}
+                    aria-label={isStreaming ? ui.wordMode : ui.sentenceMode}
                 >
                     {Icons.stream}
                 </button>
@@ -267,8 +325,8 @@ function ControlBar({
                 <button
                     className={`btn btn-icon tooltip ${isWordByWord ? 'btn-success' : ''}`}
                     onClick={onToggleWordByWord}
-                    data-tooltip={isWordByWord ? 'Akıcı Yazım Açık' : 'Akıcı Yazım Kapalı'}
-                    aria-label={isWordByWord ? 'Akıcı Yazım Açık' : 'Akıcı Yazım Kapalı'}
+                    data-tooltip={isWordByWord ? ui.flowOn : ui.flowOff}
+                    aria-label={isWordByWord ? ui.flowOn : ui.flowOff}
                 >
                     {Icons.typewriter}
                 </button>
@@ -277,8 +335,8 @@ function ControlBar({
                 <button
                     className={`btn btn-icon tooltip ${isStealthMode ? '' : 'btn-warning'}`}
                     onClick={onToggleStealth}
-                    data-tooltip={isStealthMode ? '📷 Screenshot Al (Görünür Yap)' : '🔒 Gizli Moda Dön'}
-                    aria-label={isStealthMode ? 'Screenshot Al (Görünür Yap)' : 'Gizli Moda Dön'}
+                    data-tooltip={isStealthMode ? ui.screenshot : ui.stealthBack}
+                    aria-label={isStealthMode ? ui.screenshot : ui.stealthBack}
                 >
                     {isStealthMode ? Icons.camera : Icons.shield}
                 </button>
@@ -287,8 +345,8 @@ function ControlBar({
                 <button
                     className={`btn btn-icon tooltip ${showOriginal ? '' : ''}`}
                     onClick={onToggleOriginal}
-                    data-tooltip={showOriginal ? 'İngilizceyi Gizle' : 'İngilizceyi Göster'}
-                    aria-label={showOriginal ? 'İngilizceyi Gizle' : 'İngilizceyi Göster'}
+                    data-tooltip={showOriginal ? ui.hideOriginal : ui.showOriginal}
+                    aria-label={showOriginal ? ui.hideOriginal : ui.showOriginal}
                 >
                     {showOriginal ? Icons.eye : Icons.eyeOff}
                 </button>
@@ -298,7 +356,7 @@ function ControlBar({
                     className="select-lang"
                     value={language}
                     onChange={(e) => onLanguageChange(e.target.value as 'en' | 'fi' | 'tr')}
-                    aria-label="Kaynak Dil Seçimi"
+                    aria-label={ui.sourceLang}
                 >
                     <option value="en">🇬🇧 EN</option>
                     <option value="tr">🇹🇷 TR</option>
@@ -310,19 +368,19 @@ function ControlBar({
                     className="select-lang"
                     value={engineType}
                     onChange={(e) => onEngineTypeChange(e.target.value as 'local' | 'cloud')}
-                    aria-label="Motor Seçimi"
+                    aria-label={ui.engine}
                     style={{ marginLeft: '4px' }}
                 >
-                    <option value="local">💻 Yerel</option>
-                    <option value="cloud">☁️ Bulut</option>
+                    <option value="local">{ui.local}</option>
+                    <option value="cloud">{ui.cloud}</option>
                 </select>
 
                 {/* Divider */}
                 <div className="divider" />
 
                 {/* Opacity slider */}
-                <div className="slider-container tooltip" data-tooltip="Şeffaflık">
-                    <span className="slider-label">Opaklık</span>
+                <div className="slider-container tooltip" data-tooltip={ui.opacity}>
+                    <span className="slider-label">{ui.opacity}</span>
                     <input
                         type="range"
                         className="slider"
@@ -331,12 +389,12 @@ function ControlBar({
                         step={OPACITY_STEP}
                         value={opacity}
                         onChange={(e) => onOpacityChange(parseFloat(e.target.value))}
-                        aria-label="Opaklık"
+                        aria-label={ui.opacity}
                     />
                 </div>
 
                 {/* Font size slider */}
-                <div className="slider-container tooltip" data-tooltip="Yazı Boyutu">
+                <div className="slider-container tooltip" data-tooltip={ui.fontSize}>
                     <span className="slider-label">{Icons.text}</span>
                     <input
                         type="range"
@@ -346,7 +404,7 @@ function ControlBar({
                         step={FONT_SIZE_STEP}
                         value={fontSize}
                         onChange={(e) => onFontSizeChange(parseInt(e.target.value))}
-                        aria-label="Yazı Boyutu"
+                        aria-label={ui.fontSize}
                     />
                 </div>
 
@@ -357,8 +415,8 @@ function ControlBar({
                 <button
                     className="btn btn-icon tooltip"
                     onClick={onRestartEngine}
-                    data-tooltip="Motoru Yeniden Başlat"
-                    aria-label="Motoru Yeniden Başlat"
+                    data-tooltip={ui.restartEngine}
+                    aria-label={ui.restartEngine}
                 >
                     {Icons.refresh}
                 </button>
@@ -367,8 +425,8 @@ function ControlBar({
                 <button
                     className="btn btn-icon tooltip"
                     onClick={onShowApiSettings}
-                    data-tooltip="API Ayarları"
-                    aria-label="API Ayarları"
+                    data-tooltip={ui.apiSettings}
+                    aria-label={ui.apiSettings}
                 >
                     {Icons.settings}
                 </button>
@@ -377,8 +435,8 @@ function ControlBar({
                 <button
                     className="btn btn-icon tooltip"
                     onClick={onShowUsageGuide}
-                    data-tooltip="Kullanim Senaryolari"
-                    aria-label="Kullanim Senaryolari"
+                    data-tooltip={ui.usageGuide}
+                    aria-label={ui.usageGuide}
                 >
                     {Icons.info}
                 </button>
@@ -390,8 +448,8 @@ function ControlBar({
                 <button
                     className="btn btn-icon tooltip"
                     onClick={onShowHistory}
-                    data-tooltip="Tüm Transcript"
-                    aria-label="Tüm Transcript"
+                    data-tooltip={ui.history}
+                    aria-label={ui.history}
                 >
                     {Icons.list}
                 </button>
@@ -403,8 +461,8 @@ function ControlBar({
                 <button
                     className="btn btn-icon tooltip"
                     onClick={() => onToggleVisible()}
-                    data-tooltip="Gizle"
-                    aria-label="Gizle"
+                    data-tooltip={ui.hideBar}
+                    aria-label={ui.hideBar}
                 >
                     ▼
                 </button>
@@ -416,8 +474,8 @@ function ControlBar({
                 <button
                     className="btn btn-icon tooltip btn-danger"
                     onClick={onQuit}
-                    data-tooltip="Kapat"
-                    aria-label="Kapat"
+                    data-tooltip={ui.quit}
+                    aria-label={ui.quit}
                 >
                     {Icons.x}
                 </button>

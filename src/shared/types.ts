@@ -81,6 +81,7 @@ export interface SetupConfig {
     language?: 'en' | 'fi' | 'tr';
     engineType?: 'local' | 'cloud';
     wordByWord?: boolean;
+    whisperModel?: 'tiny' | 'base' | 'small' | 'medium';
     azureSpeechKey?: string;
     azureSpeechRegion?: string;
     deepgramKey?: string;
@@ -155,6 +156,7 @@ export interface ElectronAPI {
 
     // App info
     getAppInfo: () => Promise<AppInfo>;
+    exportLogs?: () => Promise<{ ok: boolean; path: string }>;
 
     // History
     openHistoryWindow: (transcripts: unknown[]) => void;

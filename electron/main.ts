@@ -19,6 +19,114 @@ import { URL } from 'url';
 const execAsync = promisify(exec);
 import { fileURLToPath } from 'url';
 
+// ═──────────────────────────────────────────────────────────────────────────
+// MAIN LOG RING BUFFER (destek / hata raporlama icin log disa aktarimi)
+// ═──────────────────────────────────────────────────────────────────────────
+const MAIN_LOG_BUFFER: string[] = [];
+const MAIN_LOG_LIMIT = 3000;
+
+function pushMainLog(level: string, args: unknown[]): void {
+    try {
+        const line = `[${new Date().toISOString()}] ${level} ${args.map((a) => {
+            if (typeof a === 'string') return a;
+            try { return JSON.stringify(a); } catch { return String(a); }
+        }).join(' ')}`;
+        MAIN_LOG_BUFFER.push(line);
+        if (MAIN_LOG_BUFFER.length > MAIN_LOG_LIMIT) {
+            MAIN_LOG_BUFFER.splice(0, MAIN_LOG_BUFFER.length - MAIN_LOG_LIMIT);
+        }
+    } catch {
+        // buffer hatalarini yut
+    }
+}
+
+const _origLog = console.log;
+const _origError = console.error;
+const _origWarn = console.warn;
+console.log = (...args: unknown[]) => { pushMainLog('LOG', args); _origLog(...args); };
+console.error = (...args: unknown[]) => { pushMainLog('ERROR', args); _origError(...args); };
+console.warn = (...args: unknown[]) => { pushMainLog('WARN', args); _origWarn(...args); };
+
+async function exportMainLogs(): Promise<string> {
+    const logsDir = path.join(app.getPath('userData'), 'logs');
+    fs.mkdirSync(logsDir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const file = path.join(logsDir, `live-translate-${stamp}.log`);
+    const header = `# Stealth Subtitle Translator log export\n# app: ${app.getVersion()} | platform: ${process.platform}-${process.arch}\n# exported: ${new Date().toISOString()}\n`;
+    fs.writeFileSync(file, header + MAIN_LOG_BUFFER.join('\n') + '\n');
+    return file;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// AUTO-UPDATE (electron-updater) — GitHub Releases tabanli
+// ───────────────────────────────────────────────────────────────────────────
+let autoUpdateChecked = false;
+
+async function setupAutoUpdater(): Promise<void> {
+    // Sadece paketli (yayin) surumde calisir; dev'de atlanir.
+    if (!app.isPackaged) {
+        return;
+    }
+
+    try {
+        const { autoUpdater } = await import('electron-updater');
+        autoUpdater.autoDownload = true;
+        autoUpdater.autoInstallOnAppQuit = true;
+
+        autoUpdater.on('checking-for-update', () => {
+            console.log('[AutoUpdate] Checking for updates...');
+        });
+        autoUpdater.on('update-available', (info) => {
+            console.log('[AutoUpdate] Update available:', info?.version);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('update-status', {
+                    status: 'available',
+                    version: info?.version ?? '',
+                });
+            }
+        });
+        autoUpdater.on('update-not-available', () => {
+            console.log('[AutoUpdate] No updates available');
+        });
+        autoUpdater.on('download-progress', (progress) => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('update-status', {
+                    status: 'downloading',
+                    percent: Math.round(progress.percent),
+                });
+            }
+        });
+        autoUpdater.on('update-downloaded', (info) => {
+            console.log('[AutoUpdate] Downloaded:', info?.version);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('update-status', {
+                    status: 'downloaded',
+                    version: info?.version ?? '',
+                });
+            }
+        });
+        autoUpdater.on('error', (err) => {
+            console.error('[AutoUpdate] Error:', err?.message ?? err);
+        });
+
+        // Renderer'dan istenirse kullaniciya sorulmadan sessizce kontrol et.
+        ipcMain.on('check-for-updates', () => {
+            if (autoUpdateChecked) return;
+            autoUpdateChecked = true;
+            void autoUpdater.checkForUpdatesAndNotify();
+        });
+
+        // Aclista sessiz kontrol (UI'da bildirim olmadan).
+        setTimeout(() => {
+            void autoUpdater.checkForUpdatesAndNotify().catch((err: unknown) => {
+                console.error('[AutoUpdate] Initial check failed:', err instanceof Error ? err.message : err);
+            });
+        }, 10_000);
+    } catch (error) {
+        console.error('[AutoUpdate] Setup failed:', error instanceof Error ? error.message : error);
+    }
+}
+
 // Setup Config helper
 function getSetupConfigPath() {
     return path.join(app.getPath('userData'), 'live-translate-setup.json');
@@ -82,6 +190,7 @@ interface SetupConfig {
     language?: string;
     engineType?: 'local' | 'cloud';
     wordByWord?: boolean;
+    whisperModel?: 'tiny' | 'base' | 'small' | 'medium';
     azureSpeechKey?: string;
     azureSpeechRegion?: string;
     deepgramKey?: string;
@@ -180,6 +289,7 @@ const VALID_CONFIG_KEYS = new Set([
     'language',
     'engineType',
     'wordByWord',
+    'whisperModel',
     'azureSpeechKey',
     'azureSpeechRegion',
     'deepgramKey',
@@ -518,7 +628,7 @@ function verifySignedMessage(message: Buffer): Record<string, unknown> | null {
 function getPreloadPath() {
     return isDev
         ? path.join(process.cwd(), 'electron', 'preload.cjs')
-        : path.join(__dirname, 'preload.js');
+        : path.join(__dirname, 'preload.cjs');
 }
 
 function getPythonScriptPath() {
@@ -528,9 +638,11 @@ function getPythonScriptPath() {
 }
 
 function getPythonBinaryPath() {
+    // Relocatable python-build-standalone: yalnizca sistem framework'lerine bagli,
+    // bu sayede DMG baska bir Mac'e tasindiginda da calisir.
     return isDev
-        ? path.join(process.cwd(), 'python', '.venv', 'bin', 'python')
-        : path.join(process.resourcesPath, 'python', '.venv', 'bin', 'python');
+        ? path.join(process.cwd(), 'python', 'pysa', 'bin', 'python3.13')
+        : path.join(process.resourcesPath, 'python', 'pysa', 'bin', 'python3.13');
 }
 
 function sleep(ms: number): Promise<void> {
@@ -579,6 +691,10 @@ function normalizeSetupConfig(raw: unknown): SetupConfig {
         normalized.deeplKey = value.deeplKey;
     }
 
+    if (value.whisperModel === 'tiny' || value.whisperModel === 'base' || value.whisperModel === 'small' || value.whisperModel === 'medium') {
+        normalized.whisperModel = value.whisperModel;
+    }
+
     if (typeof value.ollamaEndpoint === 'string') {
         normalized.ollamaEndpoint = value.ollamaEndpoint;
     }
@@ -618,17 +734,18 @@ async function assertSafeStorageReady(): Promise<void> {
     if (!app.isReady()) {
         throw new Error('safeStorage için uygulama hazır olmalı.');
     }
-    if (!(await safeStorage.isAsyncEncryptionAvailable())) {
+    if (!safeStorage.isEncryptionAvailable()) {
         throw new Error('macOS Keychain üzerinden anahtar şifreleme kullanılamıyor.');
     }
 }
 
 function createEncryptedCredential(plainText: string): Promise<EncryptedCredential> {
-    return safeStorage.encryptStringAsync(plainText).then((data) => ({
+    // sync API (her Electron sürümünde mevcut); dış imza Promise olarak korunur
+    return Promise.resolve({
         version: 1,
         provider: 'safeStorage',
-        data: data.toString('base64'),
-    }));
+        data: safeStorage.encryptString(plainText).toString('base64'),
+    });
 }
 
 async function readDecryptedCredential(value: unknown): Promise<string | undefined> {
@@ -644,15 +761,7 @@ async function readDecryptedCredential(value: unknown): Promise<string | undefin
         throw new Error('Şifreli kimlik bilgisi formatı geçersiz.');
     }
 
-    const decoded = await safeStorage.decryptStringAsync(Buffer.from(record.data, 'base64'));
-    const result = decoded as string | { result?: string };
-    if (typeof result === 'string') {
-        return result;
-    }
-    if (typeof result.result === 'string') {
-        return result.result;
-    }
-    throw new Error('safeStorage yanıtı çözülemiyor.');
+    return safeStorage.decryptString(Buffer.from(record.data, 'base64'));
 }
 
 async function readSetupConfig(): Promise<SetupConfig> {
@@ -666,6 +775,9 @@ async function readSetupConfig(): Promise<SetupConfig> {
     const value = raw as Record<string, unknown>;
     const normalized = normalizeSetupConfig(raw);
 
+    // Eski (PR oncesi) config'ler anahtarlari duz metin saklar. Bunlari
+    // safeStorage sifrelemesine tasi (migrate) ve diske yeniden yaz.
+    let needsMigration = false;
     for (const key of SENSITIVE_SETUP_KEYS) {
         const rawValue = value[key];
         if (!rawValue) {
@@ -675,7 +787,16 @@ async function readSetupConfig(): Promise<SetupConfig> {
         const decryptedValue = await readDecryptedCredential(rawValue);
         if (decryptedValue !== undefined) {
             normalized[key] = decryptedValue;
+        } else if (typeof rawValue === 'string' && rawValue.length > 0) {
+            // Duz metin legacy deger → sifrelenecek.
+            normalized[key] = rawValue;
+            needsMigration = true;
         }
+    }
+
+    if (needsMigration) {
+        console.log('[Main] Migrating legacy plaintext credentials to safeStorage...');
+        await writeSetupConfig(normalized);
     }
 
     return normalized;
@@ -1828,6 +1949,7 @@ function startPythonEngine(setupConfig: SetupConfig): ChildProcess | null {
     if (setupConfig.deeplKey) env.DEEPL_API_KEY = setupConfig.deeplKey;
     if (setupConfig.language) env.ENGINE_SOURCE_LANG = setupConfig.language;
     if (setupConfig.engineType) env.ENGINE_TYPE = setupConfig.engineType;
+    if (setupConfig.whisperModel) env.ENGINE_WHISPER_MODEL = setupConfig.whisperModel;
     env.TRANSCRIPT_ZMQ_ADDRESS = getZmqAddress('transcript');
     env.COMMAND_ZMQ_ADDRESS = getZmqAddress('command');
     env.ZMQ_AUTH_TOKEN = ZMQ_AUTH_TOKEN;
@@ -2647,6 +2769,13 @@ function setupIpcHandlers(): void {
         arch: process.arch,
         isDev,
     }));
+
+    // Log export (destek icin)
+    ipcMain.handle('export-logs', async () => {
+        const file = await exportMainLogs();
+        console.log('[Main] Logs exported to:', file);
+        return { ok: true, path: file };
+    });
 }
 
 /**
@@ -2669,6 +2798,7 @@ if (!gotTheLock) {
 
     app.whenReady().then(async () => {
         setupIpcHandlers();
+        setupAutoUpdater();
 
         // ─── Start ZMQ publisher FIRST so commandSock is ready before the
         //     renderer loads and fires IPC calls (e.g. save-config / setLanguage).
@@ -2734,9 +2864,12 @@ if (!gotTheLock) {
         }
 
         // Delay Python engine startup to let Vite dev server stabilize
-        setTimeout(() => {
-            void launchPythonEngineWithRecovery('startup');
-        }, 1000);
+        // (STEALTH_E2E=1 iken E2E testinde engine/BlackHole gereksinimi atlanir)
+        if (!process.env.STEALTH_E2E) {
+            setTimeout(() => {
+                void launchPythonEngineWithRecovery('startup');
+            }, 1000);
+        }
 
         // Start ZMQ subscriber after Python has had time to bind its port
         setTimeout(() => {

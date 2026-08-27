@@ -4,10 +4,18 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON_DIR="$ROOT_DIR/python"
+
+# Relocatable python-build-standalone oncekli; yoksa .venv'e geri dokulur.
+PYSA_PYTHON="$PYTHON_DIR/pysa/bin/python3.13"
 VENV_DIR="$PYTHON_DIR/.venv"
 VENV_PYTHON="$VENV_DIR/bin/python"
 REQUIREMENTS_FILE="$PYTHON_DIR/requirements.txt"
-REQUIREMENTS_STAMP="$VENV_DIR/.requirements.synced"
+if [ -x "$PYSA_PYTHON" ]; then
+    RUNTIME_PYTHON="$PYSA_PYTHON"
+else
+    RUNTIME_PYTHON="$VENV_PYTHON"
+fi
+REQUIREMENTS_STAMP="$PYTHON_DIR/.requirements.synced"
 
 print_usage() {
     cat <<'EOF'
@@ -46,6 +54,16 @@ ensure_node_dependencies() {
 }
 
 ensure_python_environment() {
+    # Relocatable pysa varsa kurulum gerektirmez (requirements yuklenmis gelir).
+    if [ -x "$PYSA_PYTHON" ]; then
+        if [ ! -f "$REQUIREMENTS_STAMP" ] || [ "$REQUIREMENTS_FILE" -nt "$REQUIREMENTS_STAMP" ]; then
+            echo "[run_open_source] Syncing Python dependencies (pysa)..."
+            (cd "$ROOT_DIR" && "$PYSA_PYTHON" -m pip install -r "$REQUIREMENTS_FILE")
+            touch "$REQUIREMENTS_STAMP"
+        fi
+        return
+    fi
+
     if [ ! -x "$VENV_PYTHON" ]; then
         local python_bin
         python_bin="$(find_python)"

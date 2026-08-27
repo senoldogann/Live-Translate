@@ -35,21 +35,21 @@ describe('ControlBar Component', () => {
         render(<ControlBar {...props} />);
 
         // Assert mic button exists (listening state)
-        expect(screen.getByRole('button', { name: /durakla/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /pause/i })).toBeInTheDocument();
         // Assert stealth button
-        expect(screen.getByRole('button', { name: /gizli moda dön/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /back to stealth/i })).toBeInTheDocument();
     });
 
     it('toggles listening state', () => {
         render(<ControlBar {...props} isListening={false} />);
-        const btn = screen.getByRole('button', { name: /dinle/i });
+        const btn = screen.getByRole('button', { name: /listen/i });
         fireEvent.click(btn);
         expect(props.onToggleListening).toHaveBeenCalledTimes(1);
     });
 
     it('toggles word-by-word render mode', () => {
         render(<ControlBar {...props} isWordByWord={false} />);
-        const btn = screen.getByRole('button', { name: /akıcı yazım kapalı/i });
+        const btn = screen.getByRole('button', { name: /fluid typing off/i });
         fireEvent.click(btn);
         expect(props.onToggleWordByWord).toHaveBeenCalledTimes(1);
     });
@@ -67,21 +67,21 @@ describe('ControlBar Component', () => {
 
     it('calls quit', () => {
         render(<ControlBar {...props} />);
-        const quitBtn = screen.getByRole('button', { name: /kapat/i });
+        const quitBtn = screen.getByRole('button', { name: /quit/i });
         fireEvent.click(quitBtn);
         expect(props.onQuit).toHaveBeenCalledTimes(1);
     });
 
     it('opens usage guide', () => {
         render(<ControlBar {...props} />);
-        const guideBtn = screen.getByRole('button', { name: /kullanim senaryolari/i });
+        const guideBtn = screen.getByRole('button', { name: /usage guide/i });
         fireEvent.click(guideBtn);
         expect(props.onShowUsageGuide).toHaveBeenCalledTimes(1);
     });
 
     it('opens native API settings window', () => {
         render(<ControlBar {...props} />);
-        const settingsBtn = screen.getByRole('button', { name: /api ayarları/i });
+        const settingsBtn = screen.getByRole('button', { name: /api settings/i });
         fireEvent.click(settingsBtn);
         expect(props.onShowApiSettings).toHaveBeenCalledTimes(1);
     });
