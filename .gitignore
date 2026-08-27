@@ -70,3 +70,25 @@ coverage/
 tmp/
 temp/
 *.tmp
+
+# Local data & tooling (never commit)
+data/
+.freebuff/
+
+# Test artifacts
+playwright-report/
+test-results/
+
+# Apple notarization keys (.p8)
+AuthKey*.p8
+
+# Local agent workflow scripts (kept on disk, not in repo)
+scripts/checklist.py
+scripts/common_utils.py
+scripts/context_optimizer.py
+scripts/dependency_analyzer.py
+scripts/fix_agent_tools.py
+scripts/generate_skill_index.py
+scripts/prune_memory.py
+scripts/quickstart.py
+scripts/sync_agents.py
