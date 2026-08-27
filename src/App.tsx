@@ -16,7 +16,7 @@ import ControlBar from './components/ControlBar';
 import SiriWave from './components/SiriWave';
 import SetupWizard from './components/SetupWizard';
 import { useInteractiveZones } from './hooks/useInteractiveZones';
-import type { ApiSettingsDraft, SetupConfig } from './shared/types';
+import type { SetupConfig } from './shared/types';
 import './index.css';
 
 // Types — mirrored from src/shared/types.ts for standalone use
@@ -55,6 +55,8 @@ function isSameTranscriptPayload(
 
 // Maximum number of subtitles to display at once
 const MAX_SUBTITLES = 1;
+// Bellek sınırsız büyümesini engellemek için kaydedilen son transkript sayısı
+const MAX_TRANSCRIPT_HISTORY = 200;
 
 // How long to wait after the last subtitle before showing the wave again (ms)
 const SILENCE_TIMEOUT_MS = 3000;
@@ -84,7 +86,6 @@ function App() {
     const [azureSpeechKey, setAzureSpeechKey] = useState("");
     const [azureSpeechRegion, setAzureSpeechRegion] = useState("");
     const [deepgramKey, setDeepgramKey] = useState("");
-    const [deeplKey, setDeeplKey] = useState("");
 
     // Whether speech is currently active (controls SiriWave ↔ Subtitle toggle)
     const [isSpeechActive, setIsSpeechActive] = useState(false);
@@ -115,7 +116,6 @@ function App() {
                     if (config.azureSpeechKey) setAzureSpeechKey(config.azureSpeechKey);
                     if (config.azureSpeechRegion) setAzureSpeechRegion(config.azureSpeechRegion);
                     if (config.deepgramKey) setDeepgramKey(config.deepgramKey);
-                    if (config.deeplKey) setDeeplKey(config.deeplKey);
                 } else {
                     setIsSetupComplete(false);
                 }
@@ -275,9 +275,6 @@ function App() {
             if (config.deepgramKey !== undefined) {
                 setDeepgramKey(config.deepgramKey);
             }
-            if (config.deeplKey !== undefined) {
-                setDeeplKey(config.deeplKey);
-            }
             if (config.engineType) {
                 setEngineType(config.engineType);
             }
@@ -306,7 +303,7 @@ function App() {
             return;
         }
 
-        setAllTranscripts((prev) => [...prev, latest]);
+        setAllTranscripts((prev) => [...prev, latest].slice(-MAX_TRANSCRIPT_HISTORY));
         lastCommittedTranscriptIdRef.current = latest.id;
     }, [subtitles]);
 
@@ -359,28 +356,10 @@ function App() {
     }, [rawLiveSubtitle]);
 
     // ─── Handlers ────────────────────────────────────────────────────────────
-    const openApiSettingsWindow = useCallback(async () => {
-        let currentConfig: SetupConfig | undefined;
-        try {
-            if (window.electronAPI?.getConfig) {
-                currentConfig = await window.electronAPI.getConfig();
-            }
-        } catch (e) {
-            console.warn("Failed to fetch latest config for draft", e);
-        }
-
-        const draft: ApiSettingsDraft = {
-            azureSpeechKey,
-            azureSpeechRegion,
-            deepgramKey,
-            deeplKey,
-            ollamaEndpoint: currentConfig?.ollamaEndpoint ?? 'http://127.0.0.1:11434',
-            ollamaApiKey: currentConfig?.ollamaApiKey ?? '',
-            ollamaModel: currentConfig?.ollamaModel ?? '',
-        };
-
-        window.electronAPI?.openApiSettingsWindow?.(draft);
-    }, [azureSpeechKey, azureSpeechRegion, deepgramKey, deeplKey]);
+    const openApiSettingsWindow = useCallback(() => {
+        // Ayarlar tek dogru kaynagi ana process'te kalir; renderer anahtarlari yeniden gondermez.
+        window.electronAPI?.openApiSettingsWindow?.();
+    }, []);
 
     const handleToggleStealth = useCallback(() => {
         setIsStealthMode((prev) => !prev);

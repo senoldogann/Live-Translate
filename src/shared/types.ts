@@ -164,7 +164,7 @@ export interface ElectronAPI {
     getHistoryByDate?: (date: string) => Promise<any[]>;
 
     // Native auxiliary windows
-    openApiSettingsWindow?: (draft: ApiSettingsDraft) => void;
+    openApiSettingsWindow?: (draft?: ApiSettingsDraft) => void;
     saveApiSettingsWindow?: (draft: ApiSettingsDraft) => Promise<ApiSettingsSaveResult>;
     onApiSettingsWindowData?: (callback: (draft: ApiSettingsDraft) => void) => () => void;
     onApiSettingsUpdated?: (callback: (config: SetupConfig) => void) => () => void;

@@ -1,4 +1,4 @@
-import { render, screen, act, waitFor } from '@testing-library/react';
+import { render, screen, act, waitFor, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import App from '../App';
 
@@ -349,21 +349,54 @@ describe('App Component', () => {
         ]);
     });
 
-    it('opens native utility windows and keeps API settings state in sync', async () => {
+    it('bounds transcript history memory when many finals arrive', async () => {
+        render(<App />);
+
+        await screen.findByTestId('control-bar', {}, { timeout: 1000 });
+
+        act(() => {
+            fireEvent.click(screen.getByTestId('toggle-history'));
+        });
+
+        act(() => {
+            mockOnHistoryWindowState?.(true);
+        });
+
+        // Ayri ayri islemek, React'in her final kaydini sira ile history'ye eklemesini saglar.
+        for (let index = 0; index < 220; index += 1) {
+            act(() => {
+                mockOnTranscriptUpdate({
+                    original: `Original ${index}`,
+                    translated: `Translated ${index}`,
+                    isFinal: true,
+                    timestamp: 4000 + index,
+                });
+            });
+        }
+
+        const historyUpdateSpy = window.electronAPI.updateHistoryWindow as ReturnType<typeof vi.fn>;
+        const lastPayload = historyUpdateSpy.mock.lastCall?.[0] as unknown[] | undefined;
+        expect(lastPayload).toBeDefined();
+        expect(lastPayload).toHaveLength(200);
+        expect(lastPayload?.[0]).toEqual(
+            expect.objectContaining({ original: 'Original 20' })
+        );
+    });
+
+    it('opens native utility windows from centralized settings state', async () => {
         render(<App />);
 
         await screen.findByTestId('siri-wave', {}, { timeout: 1000 });
 
         act(() => {
-            screen.getByTestId('open-settings').click();
+            fireEvent.click(screen.getByTestId('open-settings'));
         });
 
-        expect(window.electronAPI.openApiSettingsWindow).toHaveBeenCalledWith({
-            azureSpeechKey: '',
-            azureSpeechRegion: '',
-            deepgramKey: '',
-            deeplKey: '',
+        await waitFor(() => {
+            expect(window.electronAPI.openApiSettingsWindow).toHaveBeenCalled();
         });
+
+        expect(window.electronAPI.openApiSettingsWindow).toHaveBeenCalledWith();
 
         act(() => {
             mockOnApiSettingsUpdated?.({
@@ -377,16 +410,11 @@ describe('App Component', () => {
         });
 
         act(() => {
-            screen.getByTestId('open-settings').click();
-            screen.getByTestId('open-usage-guide').click();
+            fireEvent.click(screen.getByTestId('open-settings'));
+            fireEvent.click(screen.getByTestId('open-usage-guide'));
         });
 
-        expect(window.electronAPI.openApiSettingsWindow).toHaveBeenLastCalledWith({
-            azureSpeechKey: 'azure-key',
-            azureSpeechRegion: 'francecentral',
-            deepgramKey: 'dg-key',
-            deeplKey: 'deepl-key',
-        });
+        expect(window.electronAPI.openApiSettingsWindow).toHaveBeenCalledTimes(2);
         expect(window.electronAPI.openUsageGuideWindow).toHaveBeenCalledTimes(1);
     });
 });
