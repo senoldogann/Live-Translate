@@ -257,6 +257,18 @@ body {
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
 }
 
+/* Karaoke efekti: canlı altyazıda okunan kelime parlak, geçenler soluk */
+.subtitle-translated .word-past {
+    color: rgba(255, 255, 255, 0.72);
+}
+
+.subtitle-translated .word-current {
+    color: #ffffff;
+    text-shadow:
+        0 0 14px rgba(255, 255, 255, 0.55),
+        0 2px 4px rgba(0, 0, 0, 0.6);
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════════
    CONTROL BAR
    ═══════════════════════════════════════════════════════════════════════════════ */
