@@ -1990,6 +1990,16 @@ function startPythonEngine(setupConfig: SetupConfig): ChildProcess | null {
                     if (mainWindow && !mainWindow.isDestroyed()) {
                         mainWindow.webContents.send('engine-ready');
                     }
+                } else if (line.includes('[Status]')) {
+                    // Engine durum mesajları: downloading_model|model|mb, loading_model, listening, error|...
+                    const statusPart = line.replace(/.*\[Status\]\s*/, '').trim();
+                    const [state, ...rest] = statusPart.split('|');
+                    if (mainWindow && !mainWindow.isDestroyed()) {
+                        mainWindow.webContents.send('engine-status', {
+                            state: state.trim(),
+                            detail: rest.join('|') || undefined,
+                        });
+                    }
                 }
             }
         });

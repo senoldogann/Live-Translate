@@ -447,6 +447,42 @@ body {
     box-shadow: 0 0 8px var(--color-error);
 }
 
+/* Engine status badge (model download / load / error) */
+.engine-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 10px;
+    border-radius: var(--radius-full);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--color-warning);
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    white-space: nowrap;
+}
+
+.engine-status-badge.is-error {
+    color: var(--color-error);
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.4);
+}
+
+.engine-status-spinner {
+    width: 10px;
+    height: 10px;
+    border-radius: var(--radius-full);
+    border: 2px solid rgba(245, 158, 11, 0.3);
+    border-top-color: var(--color-warning);
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 @keyframes pulse {
 
     0%,

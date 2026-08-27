@@ -16,7 +16,7 @@ import ControlBar from './components/ControlBar';
 import SiriWave from './components/SiriWave';
 import SetupWizard from './components/SetupWizard';
 import { useInteractiveZones } from './hooks/useInteractiveZones';
-import type { SetupConfig } from './shared/types';
+import type { EngineStatus, SetupConfig } from './shared/types';
 import './index.css';
 
 // Types — mirrored from src/shared/types.ts for standalone use
@@ -86,6 +86,7 @@ function App() {
     const [hasCloudProvider, setHasCloudProvider] = useState(false);
 
     // Whether speech is currently active (controls SiriWave ↔ Subtitle toggle)
+    const [engineStatus, setEngineStatus] = useState<EngineStatus | null>(null);
     const [isSpeechActive, setIsSpeechActive] = useState(false);
     const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -252,6 +253,10 @@ function App() {
             window.electronAPI?.toggleStealth(isStealthMode);
         });
 
+        const unsubscribeStatus = window.electronAPI.onEngineStatus?.((status: EngineStatus) => {
+            setEngineStatus(status);
+        });
+
         // Listen for show-control-bar (from global shortcut ⌘+Shift+S)
         const unsubscribeShowBar = window.electronAPI.onShowControlBar?.(() => {
             setShowControlBar(true);
@@ -279,6 +284,7 @@ function App() {
             unsubscribe();
             unsubscribeAudio();
             unsubscribeEngine?.();
+            unsubscribeStatus?.();
             unsubscribeShowBar?.();
             unsubscribeEngineLog?.();
             unsubscribeHistoryState?.();
@@ -615,6 +621,7 @@ function App() {
                     onShowApiSettings={openApiSettingsWindow}
                     onShowUsageGuide={() => window.electronAPI?.openUsageGuideWindow?.()}
                     showTooltips={true}
+                    engineStatus={engineStatus}
                 />
 
             </motion.div>

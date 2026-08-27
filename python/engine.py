@@ -31,6 +31,7 @@ import warnings
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import ClassVar
 
 import requests
 
@@ -361,6 +362,41 @@ class TranscriptionEngine:
         self.language = language
         self.model = None
 
+    _REPO_IDS: ClassVar[dict[str, str]] = {
+        "tiny": "Systran/faster-whisper-tiny",
+        "base": "Systran/faster-whisper-base",
+        "small": "Systran/faster-whisper-small",
+        "medium": "Systran/faster-whisper-medium",
+        "large-v3": "Systran/faster-whisper-large-v3",
+    }
+    _SIZES_MB: ClassVar[dict[str, int]] = {"tiny": 75, "base": 145, "small": 460, "medium": 1500, "large-v3": 2900}
+
+    def _model_cached(self) -> bool:
+        """Model cache'te hazır mı? (İndirme durumunu UI'a bildirmek için)
+
+        faster-whisper model dosyalarını ``download_root/models--<repo>/snapshots/<rev>/``
+        altına koyar; gerçek indirme durumunu bu yapı üzerinden kontrol ederiz.
+        """
+        repo_id = self._REPO_IDS.get(self.model_name)
+        if not repo_id:
+            return True
+        try:
+            # hf_hub cache klasör adında repo id'deki '/' -> '--' olur
+            cache_dir_name = f"models--{repo_id.replace('/', '--')}"
+            snapshots = Path.home() / ".cache" / "whisper" / cache_dir_name / "snapshots"
+            if not snapshots.is_dir():
+                return False
+            for revision in snapshots.iterdir():
+                if not revision.is_dir():
+                    continue
+                for name in ("model.bin", "model.onnx", "model.gguf"):
+                    candidate = revision / name
+                    if candidate.exists() or candidate.is_symlink():
+                        return True
+            return False
+        except Exception:
+            return False
+
     def load(self, model_name: str = None):
         """Load the Whisper model (lazy loading)"""
         if model_name:
@@ -377,6 +413,14 @@ class TranscriptionEngine:
         try:
             from faster_whisper import WhisperModel
 
+            if not self._model_cached():
+                size_mb = self._SIZES_MB.get(self.model_name, 0)
+                print(
+                    f"[Status] downloading_model|{self.model_name}|{size_mb}",
+                    flush=True,
+                )
+            print("[Status] loading_model", flush=True)
+
             self.model = WhisperModel(
                 self.model_name,
                 device=self.device,
@@ -390,6 +434,7 @@ class TranscriptionEngine:
         except ImportError:
             raise RuntimeError("faster-whisper is required. Install with: pip install faster-whisper")
         except Exception as e:
+            print(f"[Status] error|{str(e)[:200]}", flush=True)
             print(f"[Whisper] Failed to load model: {e}")
             raise
 
@@ -1313,8 +1358,26 @@ class SubtitleEngine:
             is_final = is_silence_final or is_timeout_final
 
             # 4. Prepare Audio
+            # CPU tasarrufu: canlı (partial) transkripsiyonda yalnızca son ~5 saniyeyi
+            # işle — konuşma devam ederken buffer uzadıkça Whisper maliyeti artmasın.
+            # Final transkripsiyonda tam buffer kullanılır (cümle bütünlüğü için).
             try:
-                audio = np.concatenate(current_audio_copy)
+                if not is_final and self.config.streaming_mode:
+                    max_partial_samples = int(self.config.sample_rate * 5.0)
+                    total_samples_buf = sum(len(c) for c in current_audio_copy)
+                    if total_samples_buf > max_partial_samples:
+                        keep_reversed = []
+                        acc_samples = 0
+                        for chunk in reversed(current_audio_copy):
+                            keep_reversed.append(chunk)
+                            acc_samples += len(chunk)
+                            if acc_samples >= max_partial_samples:
+                                break
+                        audio = np.concatenate(list(reversed(keep_reversed)))
+                    else:
+                        audio = np.concatenate(current_audio_copy)
+                else:
+                    audio = np.concatenate(current_audio_copy)
             except ValueError:
                 continue
 
@@ -1483,6 +1546,7 @@ class SubtitleEngine:
         self.audio_capture.start()
 
         print("[Engine] Started successfully. Listening for audio...")
+        print("[Status] listening", flush=True)
 
     def stop(self):
         """Stop the engine"""
