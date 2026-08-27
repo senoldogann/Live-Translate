@@ -25,7 +25,8 @@
         "start": "npm run electron:dev",
         "test": "vitest",
         "test:e2e": "playwright test",
-        "preview": "vite preview"
+        "preview": "vite preview",
+        "typecheck": "tsc --noEmit"
     },
     "dependencies": {
         "electron-updater": "^6.8.9",

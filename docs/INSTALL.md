@@ -1,10 +1,10 @@
-# 📥 Installation Guide / Kurulum Rehberi
+# Installation Guide / Kurulum Rehberi
 
 > For end users — no terminal required. / Terminal gerektirmez.
 
 ---
 
-## 🇬🇧 English
+## English
 
 ### What you need
 - **macOS** on an **Apple Silicon** Mac (M1/M2/M3/M4)
@@ -42,14 +42,14 @@ The in-app setup wizard guides you through the rest:
 - Pick a Whisper model size (recommended: **Small**).
 - On first use, the model downloads automatically — stay online.
 
-### Done! 🎉
-Play any video or join a meeting — subtitles appear on screen. Toggle **🛡️ Stealth** to hide the overlay from screen sharing.
+### Done
+Play any video or join a meeting — subtitles appear on screen. Toggle **Stealth** to hide the overlay from screen sharing.
 
 **Troubleshooting:** Subtitles not appearing? Check that your output is the **Multi-Output Device** and that you granted microphone access (System Settings → Privacy & Security → Microphone).
 
 ---
 
-## 🇹🇷 Türkçe
+## Türkçe
 
 ### Gerekenler
 - **Apple Silicon** (M1/M2/M3/M4) bir **Mac**
@@ -87,7 +87,7 @@ Kurulum sihirbazı gerisini adım adım anlatır:
 - Whisper model boyutunu seçin (önerilen: **Small**).
 - İlk kullanımda model otomatik iner — internet bağlı kalsın.
 
-### Tamamlandı! 🎉
-Bir video açın veya toplantıya katılın — altyazı ekranda belirir. 🛡️ **Gizli Mod** ile altyazıyı ekran paylaşımından gizleyebilirsiniz.
+### Tamamlandı
+Bir video açın veya toplantıya katılın — altyazı ekranda belirir. **Gizli Mod** ile altyazıyı ekran paylaşımından gizleyebilirsiniz.
 
 **Sorun mu var?** Altyazı görünmüyorsa: Çıkışın **Çok Çıkışlı Aygıt** olduğundan ve mikrofon iznini verdiğinizden emin olun (Sistem Ayarları → Gizlilik ve Güvenlik → Mikrofon).
