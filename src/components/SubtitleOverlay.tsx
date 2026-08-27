@@ -145,6 +145,22 @@ function SubtitleOverlay({
         filter: 'brightness(0.9)'
     };
 
+    // Karaoke efekti: canlı (partial) modda son eklenen kelime parlak vurgulanır,
+    // okunmuş kelimeler hafif soluk kalır — okurken göz cümlenin akışını takip eder.
+    const visibleWords = splitWords(visibleTranslated);
+
+    // Uzun cümlelerde taşmayı önlemek için yazı boyutunu kademeli küçült
+    const effectiveFontSize =
+        translated.length > 160
+            ? Math.round(fontSize * 0.7)
+            : translated.length > 100
+                ? Math.round(fontSize * 0.85)
+                : fontSize;
+    const effectiveOriginalSize =
+        original && original.length > 120
+            ? Math.max(10, effectiveFontSize - 6)
+            : Math.max(12, effectiveFontSize - 4);
+
     // Dynamic opacity
     const dynamicOpacity = Math.max(0.5, opacity - index * 0.15);
     return (
@@ -171,7 +187,7 @@ function SubtitleOverlay({
                 <motion.div
                     className="subtitle-original"
                     style={{
-                        fontSize: Math.max(12, fontSize - 4),
+                        fontSize: effectiveOriginalSize,
                         color: isFinal ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.6)'
                     }}
                 >
@@ -183,11 +199,19 @@ function SubtitleOverlay({
             <motion.div
                 className="subtitle-translated"
                 style={{
-                    fontSize,
+                    fontSize: effectiveFontSize,
                     color: isFinal ? '#ffffff' : 'rgba(255,255,255,0.9)'
                 }}
             >
-                {visibleTranslated} {isFinal ? '' : '...'}
+                {visibleWords.map((word, i) => (
+                    <span
+                        key={`${word}-${i}`}
+                        className={!isFinal && i === visibleWords.length - 1 ? 'word-current' : ''}
+                    >
+                        {word}{' '}
+                    </span>
+                ))}
+                {isFinal ? '' : '...'}
             </motion.div>
         </motion.div>
     );
