@@ -58,6 +58,15 @@ public final class STTEngine {
     public private(set) var isLoaded = false
     public private(set) var loadedModelURL: URL?
 
+    /// Whether the engine uses GPU (true on device, false in simulator).
+    public static var usesGPU: Bool {
+        #if targetEnvironment(simulator)
+        return false
+        #else
+        return true
+        #endif
+    }
+
     public init() {}
 
     deinit {

@@ -82,6 +82,7 @@ final class BroadcastMonitor: ObservableObject {
         case SegmentRelay.didAppendNotification:
             drainRelay()
         case SegmentRelay.broadcastStartedNotification:
+            DebugLog.shared.log("yayın başladı — LTS bağlantısı bekleniyor")
             isBroadcasting = true
             model.start()
             pip.start()
@@ -107,7 +108,11 @@ final class BroadcastMonitor: ObservableObject {
 
     private func drainRelay() {
         let segments = SegmentRelay.readAll()
+        if segments.isEmpty {
+            DebugLog.shared.log("yayın köprüsü: segment yok (henüz altyazı yok)")
+        }
         for segment in segments {
+            DebugLog.shared.log("yayın segmenti: '\(segment.original)' (final=\(segment.isFinal))")
             model.update(segment: segment.subtitleSegment)
             pip.update(text: segment.translated.isEmpty ? segment.original : segment.translated)
         }
