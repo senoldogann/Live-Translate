@@ -1,4 +1,5 @@
 import Foundation
+import LiveTranslateCore
 import SwiftUI
 
 /// User preferences persisted via `@AppStorage` (UserDefaults).
@@ -13,6 +14,8 @@ enum AppSettings {
         static let backgroundOpacity = "settings.backgroundOpacity"
         static let translationProvider = "settings.translationProvider"
         static let autoStartListening = "settings.autoStartListening"
+        static let ltsServerURL = "settings.ltsServerURL"
+        static let ltsAPIKey = "settings.ltsAPIKey"
     }
 
     // MARK: - Whisper model options
@@ -67,6 +70,7 @@ enum AppSettings {
     static let defaultFontSize: Double = 26
     static let defaultBackgroundOpacity: Double = 0.55
     static let defaultTranslationProvider = "passthrough"
+    static let defaultLTSServerURL = "ws://localhost:8765"
 
     static func displayName(forLanguage id: String) -> String {
         languageOptions.first { $0.id == id }?.displayName ?? id
@@ -99,4 +103,19 @@ final class ObservableSettings: ObservableObject {
 
     @AppStorage(AppSettings.Key.autoStartListening)
     var autoStartListening: Bool = false
+
+    @AppStorage(AppSettings.Key.ltsServerURL)
+    var ltsServerURL: String = AppSettings.defaultLTSServerURL
+
+    @AppStorage(AppSettings.Key.ltsAPIKey)
+    var ltsAPIKey: String = ""
+
+    /// Pushes the current language pair + LTS credentials into the shared
+    /// App Group container so the broadcast extension can read them.
+    func syncToAppGroup() {
+        SharedLTSConfig.serverURL = ltsServerURL
+        SharedLTSConfig.apiKey = ltsAPIKey
+        SharedLTSConfig.sourceLang = sourceLanguage
+        SharedLTSConfig.targetLang = targetLanguage
+    }
 }

@@ -25,6 +25,7 @@ targets:
       - path: Sources
         excludes:
           - LiveActivityExtension
+          - BroadcastExtension
     resources:
       - path: Resources
     dependencies:
@@ -36,6 +37,7 @@ targets:
       - sdk: Accelerate.framework
       - sdk: Metal.framework
       - target: SubtitleLiveActivity
+      - target: BroadcastExtension
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.stealth.subtitle.translator.ios
@@ -45,12 +47,35 @@ targets:
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: Support/StealthTranslate.entitlements
         INFOPLIST_FILE: Support/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_PREVIEWS: YES
         # Live Activities + background capture keys live in Support/Info.plist
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks"
         SWIFT_EMIT_LOC_STRINGS: YES
+
+  BroadcastExtension:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "16.2"
+    sources:
+      - path: Sources/BroadcastExtension
+    dependencies:
+      - package: LiveTranslateCore
+        product: LiveTranslateCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.stealth.subtitle.translator.ios.broadcast
+        PRODUCT_NAME: "LiveTranslateBroadcast"
+        INFOPLIST_FILE: Support/BroadcastExtension-Info.plist
+        CODE_SIGN_ENTITLEMENTS: Support/BroadcastExtension.entitlements
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        CODE_SIGN_STYLE: Automatic
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
 
   SubtitleLiveActivity:
     type: app-extension
