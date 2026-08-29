@@ -518,7 +518,10 @@ const PYTHON_PORT_RELEASE_POLL_MS = 100;
 const PYTHON_RECOVERY_RETRY_DELAY_MS = 500;
 
 // Environment
-const isDev = !app.isPackaged;
+// E2E (STEALTH_E2E=1) paketli olmayan build'i production HTML'i yukleyerek
+// test eder; aksi halde isDev=true dev server'a (localhost:5174) yuklenir ve
+// E2E'de sunucu olmadigi icin chrome-error alinir.
+const isDev = !app.isPackaged && process.env.STEALTH_E2E !== '1';
 const VITE_DEV_SERVER_URL = 'http://localhost:5174';
 const ENGINE_SESSION_ID = randomUUID();
 const ZMQ_AUTH_TOKEN = randomBytes(32).toString('base64url');
