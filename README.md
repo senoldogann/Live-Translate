@@ -15,6 +15,11 @@ subtitles on top of your screen. In **Local mode** your audio never leaves the m
 With **Stealth mode** enabled, the overlay is invisible to screen-capture tools (Zoom, Teams,
 OBS, QuickTime). Your audience sees a clean desktop; you see the subtitles.
 
+![Stealth Subtitle Translator in action](docs/demo.png)
+
+*Live overlay in word-by-word mode — the original sentence above, the Turkish
+translation below. Stealth mode keeps this hidden from screen capture.*
+
 ## Features
 
 **Stealth overlay** — Hidden from screen capture while Stealth mode is on. Built for
