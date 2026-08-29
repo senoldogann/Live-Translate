@@ -40,6 +40,7 @@ ios/
 │   │   ├── LiveSubtitleModel.swift    # saf altyazı durum modeli
 │   │   ├── PCMUtils.swift             # mono mix / resample / RMS / int16→float
 │   │   ├── VoiceActivityDetector.swift# enerji tabanlı VAD (engine.py fallback portu)
+│   │   ├── AdaptiveVoiceActivityDetector.swift # gürültü tabanını izleyen uyarlamalı VAD
 │   │   ├── LTSClient.swift            # WS istemcisi (app + extension ortak kullanır)
 │   │   ├── SharedLTSConfig.swift      # app group üzerinden paylaşılan sunucu ayarları
 │   │   └── SegmentRelay.swift         # extension→app JSONL segment köprüsü

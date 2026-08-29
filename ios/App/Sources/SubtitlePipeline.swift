@@ -21,7 +21,9 @@ final class SubtitlePipeline: ObservableObject {
     let model = LiveSubtitleModel()
 
     private let stt = STTEngine()
-    private let vad = VoiceActivityDetector(sampleRate: 16000)
+    // Adaptive VAD: threshold follows the ambient noise floor instead of the
+    // fixed 0.01 RMS cutoff, so quiet mics / quiet rooms no longer reject speech.
+    private let vad = AdaptiveVoiceActivityDetector()
     private let assembler = SentenceAssembler()
     private var translator: TranslationProviding = PassthroughTranslationProvider()
 
@@ -121,6 +123,7 @@ final class SubtitlePipeline: ObservableObject {
         model.stop()
         phase = .idle
         clearBuffer()
+        resetVAD()
         assembler.reset()
         Task { await LiveActivityManager.shared.end() }
     }
@@ -158,9 +161,9 @@ final class SubtitlePipeline: ObservableObject {
         guard now.timeIntervalSince(lastVADLogTime) > 1.0 else { return }
         lastVADLogTime = now
         if isSpeech {
-            DebugLog.shared.log(String(format: "VAD: ses (rms=%.3f)", rms))
+            DebugLog.shared.log(String(format: "VAD: ses (rms=%.3f, eşik=%.3f)", rms, vad.currentThreshold))
         } else {
-            DebugLog.shared.log(String(format: "VAD: SESSİZ/eşik altı (rms=%.3f)", rms))
+            DebugLog.shared.log(String(format: "VAD: SESSİZ/eşik altı (rms=%.3f, eşik=%.3f)", rms, vad.currentThreshold))
         }
     }
 
@@ -169,6 +172,14 @@ final class SubtitlePipeline: ObservableObject {
         speechBuffer.removeAll()
         lastSpeechTime = nil
         bufferLock.unlock()
+    }
+
+    // MARK: - VAD reset
+
+    /// Re-learn the noise floor between sessions (room may have changed).
+    public func resetVAD() {
+        vad.reset()
+        DebugLog.shared.log("VAD: gürültü tabanı sıfırlandı")
     }
 
     // MARK: - Processing loop
