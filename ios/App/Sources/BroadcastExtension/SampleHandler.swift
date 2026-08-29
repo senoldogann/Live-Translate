@@ -22,11 +22,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
         // Defer everything to this callback — the user may cancel the system
         // picker's countdown before the broadcast actually starts.
         guard SharedLTSConfig.isConfigured else {
-            finishBroadcastWithError(NSError(
-                domain: "BroadcastExtension",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "LTS sunucu adresi ayarlanmamış. Uygulamada Ayarlar → Bulut bölümünden sunucu adresini girin."]
-            ))
+            fail("LTS sunucu adresi ayarlanmamış. Uygulamada Ayarlar → Bulut bölümünden sunucu adresini girin.")
             return
         }
 
@@ -36,11 +32,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
             SegmentRelay.append(RelaySegment(segment: segment))
         }
         client.onError = { [weak self] message in
-            self?.finishBroadcastWithError(NSError(
-                domain: "BroadcastExtension",
-                code: 2,
-                userInfo: [NSLocalizedDescriptionKey: "LTS bağlantı hatası: \(message)"]
-            ))
+            self?.fail("LTS bağlantı hatası: \(message)")
         }
 
         client.connect(
@@ -87,5 +79,17 @@ final class SampleHandler: RPBroadcastSampleHandler {
         isConnected = false
         SharedLTSConfig.isBroadcasting = false
         SegmentRelay.postBroadcastFinished()
+    }
+
+    /// Writes the error to the App Group (read by the main app) and terminates
+    /// the broadcast so the user sees the reason in-app.
+    private func fail(_ message: String) {
+        SharedLTSConfig.lastError = message
+        SegmentRelay.postBroadcastFinished()
+        finishBroadcastWithError(NSError(
+            domain: "BroadcastExtension",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: message]
+        ))
     }
 }

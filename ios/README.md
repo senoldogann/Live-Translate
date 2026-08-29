@@ -11,6 +11,9 @@ Cihaz sesi (YouTube/video/çağrı) → Broadcast Extension → LTS bulut sunucu
 - ✅ **Faz 1** — Konuşma tanıma tamamen cihazda (whisper.cpp, offline); ses cihazdan çıkmaz.
 - ✅ **Faz 2** — Live Activity: kilit ekranı + Dynamic Island'da canlı çeviri; `UIBackgroundModes: audio`
   ile arka planda da devam eder.
+- ✅ **Faz 4** — Transcript geçmişi (TXT/SRT export, tarih gruplama), yayın hata mesajları,
+  Privacy manifest (app + extension), App Store inceleme kontrol listesi
+  (`docs/app-store-review-checklist.md`).
 - ✅ **Faz 3** — Cihaz sesi senaryosu:
   - **LTS Server** (`python/lts_server.py`): macOS `engine.py` çekirdeğini WebSocket servisi olarak
     sunar — istemci 16 kHz mono int16 PCM akıtır, partial/final + çeviri segmentleri geri alır.

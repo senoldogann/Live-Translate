@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var viewModel: SubtitleViewModel
     @State private var showSettings = false
+    @State private var showHistory = false
 
     var body: some View {
         ZStack {
@@ -44,6 +45,9 @@ struct ContentView: View {
             SettingsView(settings: viewModel.settings)
                 .environmentObject(viewModel)
         }
+        .sheet(isPresented: $showHistory) {
+            TranscriptHistoryView(viewModel: viewModel)
+        }
     }
 
     private var header: some View {
@@ -56,6 +60,13 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            Button {
+                showHistory = true
+            } label: {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.title3)
+            }
+            .accessibilityLabel("Geçmiş")
             Button {
                 showSettings = true
             } label: {
@@ -163,13 +174,21 @@ struct ContentView: View {
     }
 
     private var broadcastStatusBar: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "dot.radiowaves.left.and.right")
-                .foregroundStyle(Color.red)
-            Text(viewModel.broadcast.isBroadcasting ? "Yayın aktif — cihaz sesi çevriliyor" : "Yayın hazır")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Image(systemName: "dot.radiowaves.left.and.right")
+                    .foregroundStyle(viewModel.broadcast.isBroadcasting ? Color.red : Color.secondary)
+                Text(viewModel.broadcast.isBroadcasting ? "Yayın aktif — cihaz sesi çevriliyor" : "Yayın hazır")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            if let error = viewModel.broadcast.lastError {
+                Text(error)
+                    .font(.caption2)
+                    .foregroundStyle(Color.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(.horizontal, 4)
     }
