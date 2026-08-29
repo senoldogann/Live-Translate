@@ -15,7 +15,6 @@ from lts_server import (
     make_segment,
 )
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # Fakes
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -59,6 +58,22 @@ def silence_chunk(seconds=0.5, sample_rate=16000):
     return np.zeros(n, dtype=np.float32)
 
 
+class EnergyVAD:
+    """Deterministic energy-based VAD for tests.
+
+    The real VAD prefers webrtcvad when installed (CI installs it), and WebRTC
+    VAD rejects constant-amplitude synthetic audio — so tests inject this
+    fallback instead of depending on the environment.
+    """
+
+    def __init__(self, threshold: float = 0.01):
+        self.threshold = threshold
+
+    def is_speech(self, audio_chunk: np.ndarray) -> bool:
+        rms = float(np.sqrt(np.mean(np.asarray(audio_chunk, dtype=np.float32) ** 2)))
+        return rms > self.threshold
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Unit tests — LTSSession
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -71,6 +86,7 @@ class LTSSessionTests(unittest.TestCase):
             translator=FakeTranslator(),
             source_lang="tr",
             target_lang="en",
+            vad=EnergyVAD(),
             **kwargs,
         )
 
@@ -138,6 +154,7 @@ class LTSSessionTests(unittest.TestCase):
             source_lang="tr",
             target_lang="en",
             max_segment_duration=0.8,
+            vad=EnergyVAD(),
         )
         for t in (100.0, 100.2, 100.4, 100.6, 100.8):
             session.feed_samples(loud_chunk(0.5), now=t)
@@ -171,6 +188,7 @@ class LTSSessionTests(unittest.TestCase):
             translator=FakeTranslator(),
             source_lang="tr",
             target_lang="en",
+            vad=EnergyVAD(),
         )
         session.feed_samples(loud_chunk(0.5), now=100.0)
         self.assertEqual(session.tick(now=100.2), [])
@@ -186,6 +204,7 @@ class LTSSessionTests(unittest.TestCase):
             translator=FakeTranslator(),
             source_lang="tr",
             target_lang="en",
+            vad=EnergyVAD(),
         )
         session.feed_samples(loud_chunk(0.5), now=100.0)
         session.tick(now=100.8)  # final → last_context set
@@ -263,7 +282,7 @@ class LTSWebSocketTests(unittest.TestCase):
                 while asyncio.get_event_loop().time() < deadline:
                     try:
                         msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=1))
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         break
                     if msg.get("type") == "segment":
                         segments.append(msg)

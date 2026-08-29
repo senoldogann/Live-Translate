@@ -28,8 +28,9 @@ import asyncio
 import json
 import os
 import time
-from dataclasses import dataclass, field
-from typing import Any, Callable
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 import websockets
@@ -120,6 +121,7 @@ class LTSSession:
         partial_window: float = PARTIAL_WINDOW,
         processing_interval: float = PROCESSING_INTERVAL,
         min_audio_duration: float = MIN_AUDIO_DURATION,
+        vad: Any = None,
     ):
         self.transcriber = transcriber
         self.translator = translator
@@ -133,7 +135,9 @@ class LTSSession:
         self.processing_interval = processing_interval
         self.min_audio_duration = min_audio_duration
 
-        self.vad = VoiceActivityDetector(sample_rate=SAMPLE_RATE)
+        # Injectable so tests are deterministic regardless of whether the
+        # webrtcvad package is installed (WebRTC VAD rejects synthetic audio).
+        self.vad = vad if vad is not None else VoiceActivityDetector(sample_rate=SAMPLE_RATE)
         self._buffer: list[np.ndarray] = []
         self._buffer_samples = 0
         self._last_speech_time: float | None = None
@@ -377,7 +381,7 @@ class LTSServer:
             await asyncio.gather(receive_loop(), process_loop())
         except websockets.ConnectionClosed:
             pass
-        except Exception as exc:  # noqa: BLE001 — keep the connection alive per-client
+        except Exception as exc:
             try:
                 await websocket.send(json.dumps({"type": "error", "message": str(exc)}))
             except websockets.ConnectionClosed:
