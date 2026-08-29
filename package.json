@@ -25,7 +25,8 @@
         "start": "npm run electron:dev",
         "test": "vitest",
         "test:e2e": "playwright test",
-        "preview": "vite preview"
+        "preview": "vite preview",
+        "typecheck": "tsc --noEmit"
     },
     "dependencies": {
         "electron-updater": "^6.8.9",
@@ -41,7 +42,7 @@
         "@types/react": "^18.3.18",
         "@types/react-dom": "^18.3.5",
         "@vitejs/plugin-react": "^4.3.4",
-        "concurrently": "^9.1.2",
+        "concurrently": "^10.0.5",
         "electron": "^44.0.0",
         "electron-builder": "^26.15.3",
         "jsdom": "^27.4.0",
@@ -50,7 +51,7 @@
         "vite-plugin-electron": "^0.28.8",
         "vite-plugin-electron-renderer": "^0.14.6",
         "vitest": "^4.0.16",
-        "wait-on": "^8.0.2"
+        "wait-on": "^9.1.0"
     },
     "build": {
         "appId": "com.stealth.subtitle.translator",

@@ -1,30 +1,32 @@
-# Hardened Runtime — Durum Notu
+# Hardened Runtime — Notlar
 
-## Özet
-Üretim DMG şu an **Hardened Runtime kapalı** (`package.json` → `mac.hardenedRuntime: false`).
-Bu, notarization için **engel değildir** (Apple, Developer ID imzası + notarization'ı hardened
-olmadan da kabul eder). Ancak dağıtım güvenliği için hardened tercih edilir — aşağıdaki
-araştırma notu saklanır.
+## Durum (Ağustos 2026)
 
-## Gözlem (bu geliştirme makinesinde, Ağustos 2026)
-- Electron 33 ve 38'de, **Developer ID + Hardened Runtime** imzalı app,
+Üretim DMG'si **Hardened Runtime açık** (`package.json` → `mac.hardenedRuntime: true`) ve
+notarize edilmiş durumda. `spctl --assess --type execute` → `accepted, source=Notarized
+Developer ID`.
+
+## Yaşanan sorun ve çözümü
+
+- Electron 33 ve 38'de, **Developer ID + Hardened Runtime** imzalı uygulama
   `v8::Isolate::Initialize` içinde şu hatayla çöküyordu:
+
   ```
   Fatal process out of memory: Failed to reserve virtual memory for CodeRange
   ```
+
 - Aynı binary **adhoc (hardened'sız)** imzalıyken sorunsuz çalışıyordu.
-- JIT entitlement'ları (`allow-unsigned-executable-memory`,
-  `disable-executable-page-protection`, `disable-library-validation`) ana exe'ye
-  imzalandı ve `codesign --verify --deep --strict` temizdi; buna rağmen hardened'ta crash devam etti.
-- `--js-flags=--jitless` hardened'ta app'i açtı → sorun, V8 JIT'in executable bellek
-  ayırmasıyla hardened runtime'ın macOS tarafındaki etkileşimine özgü.
+- İlk denemede yalnızca `allow-unsigned-executable-memory`,
+  `disable-executable-page-protection`, `disable-library-validation` entitlement'ları
+  eklendi; crash sürdü.
+- **Kök neden:** eksik `com.apple.security.cs.allow-jit` entitlement'ı. V8'in JIT ile
+  executable bellek ayırması, hardened runtime altında bu izin olmadan reddediliyor.
 
-## Karar
-- **Şimdilik:** `hardenedRuntime: false` ile yayın. Notarization + stapler bu imzayla yapılabilir.
-- **Başka bir M-serisi makinede** hardened'ı tekrar deneyin (`hardenedRuntime: true` +
-  mevcut entitlements). Sorun bu makineye özel ise hardened'ı kalıcı açın.
-- Notarization sırasında hardened'sız imzanın Gatekeeper'ı geçtiğini `spctl` ile doğrulayın.
+**Kalıcı çözüm:** `build/entitlements.mac.plist` içine `com.apple.security.cs.allow-jit`
+ve `com.apple.security.device.audio-input` eklendi. Hardened Runtime açık, uygulama
+crash'siz çalışıyor ve notarization kabul ediliyor.
 
-## Kaynaklar
-- `build/entitlements.mac.plist` — mevcut izin seti (JIT + native libs için hazır).
-- `scripts/notarize.sh` — notarization akışı.
+## Not
+
+Bu not, ileride aynı crash'le karşılaşılırsa diye saklanır. Eğer yeni bir makinede
+CodeRange hatası görülürse önce `allow-jit` entitlement'ının imzada olduğunu kontrol edin.
