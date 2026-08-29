@@ -17,7 +17,7 @@ webrtcvad>=2.0.10
 pyzmq>=25.0.0
 
 # WS API client bindings for cloud implementation 
-websockets>=13.0
+websockets>=17.0.1
 azure-cognitiveservices-speech>=1.51.2,<2.0.0
 deepgram-sdk>=6.0.0,<7.0.0
 
