@@ -48,6 +48,12 @@ interface InteractiveZone {
     height: number;
 }
 
+// Engine durum mesajı (model indirme/yükleme/dinleme/hata)
+interface EngineStatus {
+    state: 'downloading_model' | 'loading_model' | 'listening' | 'error';
+    detail?: string;
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // NEW API INTERFACE (Must match Renderer usage)
 // ════════════════════════════════════════════════════════════════════════════
@@ -110,6 +116,7 @@ interface ElectronAPI {
     onShowControlBar: (callback: () => void) => () => void;
     onEngineReady: (callback: () => void) => () => void;
     onEngineLog: (callback: (msg: string) => void) => () => void;
+    onEngineStatus: (callback: (data: EngineStatus) => void) => () => void;
 
     // Ollama model listesi
     fetchOllamaModels: (endpoint: string, apiKey: string) => Promise<{ ok: boolean; models?: { name: string }[]; message?: string }>;
@@ -269,6 +276,19 @@ const electronAPI: ElectronAPI = {
         ipcRenderer.on('engine-log', handler);
         return () => {
             ipcRenderer.removeListener('engine-log', handler);
+        };
+    },
+
+    // ═══════════════════════════════════════════════════════════════
+    // Engine Status (downloading_model | loading_model | listening | error)
+    // ═══════════════════════════════════════════════════════════════
+    onEngineStatus: (callback: (data: EngineStatus) => void) => {
+        const handler = (_event: IpcRendererEvent, data: EngineStatus) => {
+            callback(data);
+        };
+        ipcRenderer.on('engine-status', handler);
+        return () => {
+            ipcRenderer.removeListener('engine-status', handler);
         };
     },
 

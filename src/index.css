@@ -257,6 +257,18 @@ body {
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
 }
 
+/* Karaoke efekti: canlı altyazıda okunan kelime parlak, geçenler soluk */
+.subtitle-translated .word-past {
+    color: rgba(255, 255, 255, 0.72);
+}
+
+.subtitle-translated .word-current {
+    color: #ffffff;
+    text-shadow:
+        0 0 14px rgba(255, 255, 255, 0.55),
+        0 2px 4px rgba(0, 0, 0, 0.6);
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════════
    CONTROL BAR
    ═══════════════════════════════════════════════════════════════════════════════ */
@@ -445,6 +457,42 @@ body {
 .status-dot.error {
     background: var(--color-error);
     box-shadow: 0 0 8px var(--color-error);
+}
+
+/* Engine status badge (model download / load / error) */
+.engine-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 10px;
+    border-radius: var(--radius-full);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--color-warning);
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    white-space: nowrap;
+}
+
+.engine-status-badge.is-error {
+    color: var(--color-error);
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.4);
+}
+
+.engine-status-spinner {
+    width: 10px;
+    height: 10px;
+    border-radius: var(--radius-full);
+    border: 2px solid rgba(245, 158, 11, 0.3);
+    border-top-color: var(--color-warning);
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 @keyframes pulse {

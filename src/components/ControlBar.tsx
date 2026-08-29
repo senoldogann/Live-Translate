@@ -43,6 +43,7 @@ interface ControlBarProps {
     onShowApiSettings: () => void;
     onShowUsageGuide: () => void;
     showTooltips?: boolean;
+    engineStatus?: { state: 'downloading_model' | 'loading_model' | 'listening' | 'error'; detail?: string } | null;
 }
 
 // Icons (inline SVG for bundle size)
@@ -186,6 +187,9 @@ const UI_TEXTS = {
         engine: 'Engine',
         local: '💻 Local',
         cloud: '☁️ Cloud',
+        downloadingModel: 'Downloading Whisper model (first run, ~{size}MB)...',
+        loadingModel: 'Loading model...',
+        engineError: 'Engine error',
     },
     tr: {
         listening: 'Dinleniyor',
@@ -212,6 +216,9 @@ const UI_TEXTS = {
         engine: 'Motor Seçimi',
         local: '💻 Yerel',
         cloud: '☁️ Bulut',
+        downloadingModel: 'Whisper modeli indiriliyor (ilk açılış, ~{size}MB)...',
+        loadingModel: 'Model yükleniyor...',
+        engineError: 'Motor hatası',
     },
 } as const;
 
@@ -241,6 +248,7 @@ function ControlBar({
     onShowApiSettings,
     onShowUsageGuide,
     showTooltips = true,
+    engineStatus = null,
 }: ControlBarProps) {
     const ui = language === 'tr' ? UI_TEXTS.tr : UI_TEXTS.en;
     const [isDragging, setIsDragging] = useState(false);
@@ -297,6 +305,24 @@ function ControlBar({
                     aria-label={isListening ? ui.listening : ui.paused}
                     role="status"
                 />
+
+                {/* Engine status badge (model download / load / error) */}
+                {engineStatus && engineStatus.state !== 'listening' && (
+                    <span
+                        className={`engine-status-badge ${engineStatus.state === 'error' ? 'is-error' : ''}`}
+                        role="status"
+                        aria-live="polite"
+                    >
+                        {engineStatus.state === 'downloading_model' && (
+                            <span className="engine-status-spinner" aria-hidden="true" />
+                        )}
+                        {engineStatus.state === 'downloading_model'
+                            ? ui.downloadingModel.replace('{size}', engineStatus.detail?.split('|')[1] ?? '')
+                            : engineStatus.state === 'loading_model'
+                                ? ui.loadingModel
+                                : ui.engineError}
+                    </span>
+                )}
 
                 {/* Divider */}
                 <div className="divider" />
