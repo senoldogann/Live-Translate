@@ -76,12 +76,15 @@ is published.
 
 ## iOS (in development)
 
-An iOS companion app is under active development — real-time subtitles on iPhone with
-**on-device** speech recognition (whisper.cpp), no cloud or internet required for Phase 1.
+An iOS companion app with real-time subtitles on iPhone: **on-device** speech recognition
+(whisper.cpp) for the microphone, and a ReplayKit Broadcast Extension + LTS cloud server for
+device audio (YouTube/video/calls) with a floating Picture-in-Picture subtitle window.
 
-- **Faz 1 (current):** microphone → on-device Whisper → live subtitles (works offline).
-- **Faz 2–4 (planned):** Live Activity (lock screen), device audio + calls via ReplayKit
-  Broadcast Extension with cloud STT, PiP subtitles, App Store release.
+- **Faz 1 (done):** microphone → on-device Whisper → live subtitles (works offline, no cloud).
+- **Faz 2 (done):** Live Activity — subtitles on the lock screen + Dynamic Island.
+- **Faz 3 (done):** device audio via ReplayKit Broadcast Extension → LTS WebSocket server
+  (`python/lts_server.py`) → app-group relay → PiP subtitle window.
+- **Faz 4 (planned):** calls, transcript history, App Store release.
 
 See [ios/README.md](ios/README.md) for build instructions (XcodeGen + whisper.cpp
 XCFramework) and the [iOS design doc](docs/superpowers/specs/2026-08-29-ios-subtitle-translation-design.md)

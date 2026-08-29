@@ -12,6 +12,7 @@ struct SettingsView: View {
                 languageSection
                 appearanceSection
                 translationSection
+                cloudSection
                 aboutSection
             }
             .navigationTitle("Ayarlar")
@@ -91,6 +92,9 @@ struct SettingsView: View {
                         Text(lang.displayName).tag(lang.id)
                     }
                 }
+                .onChange(of: settings.sourceLanguage) { _ in
+                    settings.syncToAppGroup()
+                }
             } header: {
                 Text("Dil")
             } footer: {
@@ -102,6 +106,9 @@ struct SettingsView: View {
                     ForEach(AppSettings.languageOptions.filter { $0.id != "auto" }, id: \.id) { lang in
                         Text(lang.displayName).tag(lang.id)
                     }
+                }
+                .onChange(of: settings.targetLanguage) { _ in
+                    settings.syncToAppGroup()
                 }
             } header: {
                 Text("Hedef Dil")
@@ -142,12 +149,48 @@ struct SettingsView: View {
         Section {
             Picker("Çeviri sağlayıcısı", selection: $settings.translationProvider) {
                 Text("Geçiş (orijinal metin)").tag("passthrough")
-                Text("Bulut çevirisi (yakında)").tag("cloud").disabled(true)
+                Text("Bulut (LTS sunucusu)").tag("lts")
             }
         } header: {
             Text("Çeviri")
         } footer: {
-            Text("Şu an çeviri passthrough modunda — orijinal metin gösterilir. Bulut çevirisi (DeepL/Azure) bir sonraki sürümde gelecek.")
+            Text("Bulut modu, cihaz sesi için yayın (broadcast) altyapısını ve bulut çevirisini etkinleştirir. Sunucu adresini aşağıdan ayarlayın.")
+        }
+    }
+
+    // MARK: - Cloud / Broadcast
+
+    @State private var ltsServerURL: String = ""
+    @State private var ltsAPIKey: String = ""
+
+    private var cloudSection: some View {
+        Section {
+            TextField("Sunucu adresi", text: $ltsServerURL)
+                .keyboardType(.URL)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            SecureField("API anahtarı (opsiyonel)", text: $ltsAPIKey)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+        } header: {
+            Text("Bulut & Yayın")
+        } footer: {
+            Text("LTS sunucusu, cihaz sesini yazıya döküp çevirir. Yayını başlatmak için ana ekrandaki yayın düğmesini kullanın. Bilgiler kaydedilir ve yayın uzantısıyla paylaşılır.")
+        }
+        .onAppear {
+            ltsServerURL = settings.ltsServerURL
+            ltsAPIKey = settings.ltsAPIKey
+        }
+        .onChange(of: ltsServerURL) { newValue in
+            settings.ltsServerURL = newValue
+            settings.syncToAppGroup()
+        }
+        .onChange(of: ltsAPIKey) { newValue in
+            settings.ltsAPIKey = newValue
+            settings.syncToAppGroup()
+        }
+        .onDisappear {
+            settings.syncToAppGroup()
         }
     }
 

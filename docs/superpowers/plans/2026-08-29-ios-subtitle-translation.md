@@ -45,15 +45,16 @@ Mevcut macOS çekirdeği (engine.py) çok platformlu sunucuda yeniden kullanıl�
 
 **Amaç:** Cihaz sesi (YouTube/video) ve çağrı senaryoları; PiP penceresinde altyazı.
 
-- [ ] **3.1** Çok platformlu sunucu (LTS Server): engine.py çekirdeğini servis yap (WS)
+- [x] **3.1** Çok platformlu sunucu (LTS Server): engine.py çekirdeğini servis yap (WS) — `python/lts_server.py`
   - `STT` uç noktası (faster-whisper) + `translate` uç noktası (DeepL/Argos)
-  - Auth (API key) + kota sayacı
-- [ ] **3.2** ReplayKit Broadcast Extension (app group, dairesel tampon)
-- [ ] **3.3** Extension → ana app PCM akışı (App Group / UDP localhost)
-- [ ] **3.4** `CloudSTTClient`: WS üzerinden sunucuya ses akışı + partial/final alımı
-- [ ] **3.5** `TranslationClient`: sunucudan çeviri
-- [ ] **3.6** PiP controller: `AVPictureInPictureController.customContentSource` + altyazı view
-- [ ] **3.7** Entegrasyon testi: kısa YouTube klibi → PiP'te çevirili altyazı
+  - Auth (API key) + kota sayacı; 14 birim test + WS e2e testi (48 test suite'te)
+- [x] **3.2** ReplayKit Broadcast Extension (app group) — `Sources/BroadcastExtension/`
+  - `RPBroadcastProcessModeSampleBuffer` + `NSExtensionPrincipalClass`; doğrudan LTS'e WS
+- [x] **3.3** Extension → ana app segment akışı (App Group JSONL + Darwin notification) — `SegmentRelay`
+- [x] **3.4** `LTSClient`: WS üzerinden sunucuya PCM akışı + partial/final alımı (Core'da, paylaşımlı)
+- [x] **3.5** Çeviri sunucuda tek boruda (STT + çeviri) — `LTSSession.tick`
+- [x] **3.6** PiP controller: `AVPictureInPictureController.ContentSource(sampleBufferDisplayLayer:)` + altyazı view — `PipSubtitleController`
+- [ ] **3.7** Entegrasyon testi: kısa YouTube klibi → PiP'te çevirili altyazı (gerçek cihaz gerekli)
 
 **Çıkış:** Cihaz sesi senaryosu çalışıyor; uçtan uca gecikme 2-4 sn.
 

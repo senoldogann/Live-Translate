@@ -14,12 +14,15 @@ final class SubtitleViewModel: ObservableObject {
 
     let pipeline: SubtitlePipeline
     let settings: ObservableSettings
+    let broadcast: BroadcastMonitor
 
     private var cancellables = Set<AnyCancellable>()
 
     init(pipeline: SubtitlePipeline, settings: ObservableSettings) {
         self.pipeline = pipeline
         self.settings = settings
+        self.broadcast = BroadcastMonitor(model: pipeline.model)
+        settings.syncToAppGroup()
         pipeline.model.onUpdate = { [weak self] model in
             Task { @MainActor in
                 self?.sync(from: model)
@@ -29,6 +32,15 @@ final class SubtitleViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] phase in
                 self?.phase = phase
+            }
+            .store(in: &cancellables)
+        broadcast.$isBroadcasting
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isBroadcasting in
+                // Stop local mic capture while a broadcast is active (the
+                // extension already owns the audio path). Idempotent.
+                guard let self, isBroadcasting else { return }
+                self.pipeline.stop()
             }
             .store(in: &cancellables)
     }

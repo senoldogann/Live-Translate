@@ -32,6 +32,9 @@ struct ContentView: View {
                 }
 
                 Spacer()
+                if viewModel.settings.translationProvider == "lts" {
+                    broadcastStatusBar
+                }
                 statusBar
                 controls
             }
@@ -124,17 +127,50 @@ struct ContentView: View {
             }
             .accessibilityLabel(viewModel.isListening ? "Dinlemeyi durdur" : "Dinlemeyi başlat")
             .disabled(viewModel.phase == .loadingModel)
+            .disabled(viewModel.broadcast.isBroadcasting)
 
-            if !viewModel.originalText.isEmpty {
-                Button {
-                    viewModel.clearTranscript()
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
+            if viewModel.broadcast.isBroadcasting {
+                // Broadcasting — show the stop toggle + status instead.
+                broadcastButton
+            } else {
+                if !viewModel.originalText.isEmpty {
+                    Button {
+                        viewModel.clearTranscript()
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityLabel("Altyazıyı temizle")
                 }
-                .accessibilityLabel("Altyazıyı temizle")
             }
         }
+    }
+
+    private var broadcastButton: some View {
+        VStack(spacing: 4) {
+            BroadcastPickerView()
+                .frame(width: 64, height: 64)
+                .clipShape(Circle())
+                .overlay(
+                    Circle().stroke(Color.accentColor.opacity(0.6), lineWidth: 2)
+                )
+            Text("Yayın")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityLabel("Cihaz sesini yayınla (ekran kaydı başlatıcı)")
+    }
+
+    private var broadcastStatusBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "dot.radiowaves.left.and.right")
+                .foregroundStyle(Color.red)
+            Text(viewModel.broadcast.isBroadcasting ? "Yayın aktif — cihaz sesi çevriliyor" : "Yayın hazır")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 4)
     }
 }
