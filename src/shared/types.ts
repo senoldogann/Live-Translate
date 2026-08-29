@@ -117,6 +117,15 @@ export interface SubtitleEntry {
 // Electron API Interface (preload bridge)
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Engine Status (model indirme/yükleme, dinleme durumu)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export interface EngineStatus {
+    state: 'downloading_model' | 'loading_model' | 'listening' | 'error';
+    detail?: string;
+}
+
 export interface ElectronAPI {
     // Transcript updates
     onTranscriptUpdate: (callback: (data: TranscriptMessage) => void) => () => void;
@@ -124,6 +133,7 @@ export interface ElectronAPI {
     onEngineReady: (callback: () => void) => () => void;
     onShowControlBar: (callback: () => void) => () => void;
     onEngineLog?: (callback: (msg: string) => void) => () => void;
+    onEngineStatus?: (callback: (data: EngineStatus) => void) => () => void;
 
     // Window controls
     setIgnoreMouseEvents: (ignore: boolean, options?: { forward: boolean }) => void;

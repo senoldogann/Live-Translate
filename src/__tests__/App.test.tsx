@@ -201,7 +201,7 @@ describe('App Component', () => {
         });
 
         expect(window.electronAPI.setLanguage).toHaveBeenCalledWith('en');
-        expect(window.electronAPI.setStreamingMode).toHaveBeenCalledWith(false);
+        expect(window.electronAPI.setStreamingMode).toHaveBeenCalledWith(true);
         expect(window.electronAPI.setEngineType).toHaveBeenCalledWith('local');
         expect(window.electronAPI.toggleStealth).toHaveBeenCalledWith(false);
     });

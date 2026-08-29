@@ -31,6 +31,7 @@ import warnings
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import ClassVar
 
 import requests
 
@@ -83,8 +84,8 @@ class EngineConfig:
     # Audio device
     audio_device: str | None = "BlackHole 2ch"  # None for default
 
-    # Streaming setting
-    streaming_mode: bool = False
+    # Streaming setting (partial subtitles shown live, then finalized)
+    streaming_mode: bool = True
 
     # Engine Settings
     engine_type: str = "local"  # "local" or "cloud"
@@ -159,6 +160,11 @@ class TranscriptResult:
     confidence: float = 0.0
     source: str = "local"
     translationProvider: str = "passthrough"
+
+
+def _ends_with_sentence_punctuation(text: str) -> bool:
+    """True if the text ends with a sentence-final punctuation mark."""
+    return bool(text) and text[-1] in ".!?…"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -356,6 +362,41 @@ class TranscriptionEngine:
         self.language = language
         self.model = None
 
+    _REPO_IDS: ClassVar[dict[str, str]] = {
+        "tiny": "Systran/faster-whisper-tiny",
+        "base": "Systran/faster-whisper-base",
+        "small": "Systran/faster-whisper-small",
+        "medium": "Systran/faster-whisper-medium",
+        "large-v3": "Systran/faster-whisper-large-v3",
+    }
+    _SIZES_MB: ClassVar[dict[str, int]] = {"tiny": 75, "base": 145, "small": 460, "medium": 1500, "large-v3": 2900}
+
+    def _model_cached(self) -> bool:
+        """Model cache'te hazır mı? (İndirme durumunu UI'a bildirmek için)
+
+        faster-whisper model dosyalarını ``download_root/models--<repo>/snapshots/<rev>/``
+        altına koyar; gerçek indirme durumunu bu yapı üzerinden kontrol ederiz.
+        """
+        repo_id = self._REPO_IDS.get(self.model_name)
+        if not repo_id:
+            return True
+        try:
+            # hf_hub cache klasör adında repo id'deki '/' -> '--' olur
+            cache_dir_name = f"models--{repo_id.replace('/', '--')}"
+            snapshots = Path.home() / ".cache" / "whisper" / cache_dir_name / "snapshots"
+            if not snapshots.is_dir():
+                return False
+            for revision in snapshots.iterdir():
+                if not revision.is_dir():
+                    continue
+                for name in ("model.bin", "model.onnx", "model.gguf"):
+                    candidate = revision / name
+                    if candidate.exists() or candidate.is_symlink():
+                        return True
+            return False
+        except Exception:
+            return False
+
     def load(self, model_name: str = None):
         """Load the Whisper model (lazy loading)"""
         if model_name:
@@ -372,6 +413,14 @@ class TranscriptionEngine:
         try:
             from faster_whisper import WhisperModel
 
+            if not self._model_cached():
+                size_mb = self._SIZES_MB.get(self.model_name, 0)
+                print(
+                    f"[Status] downloading_model|{self.model_name}|{size_mb}",
+                    flush=True,
+                )
+            print("[Status] loading_model", flush=True)
+
             self.model = WhisperModel(
                 self.model_name,
                 device=self.device,
@@ -385,6 +434,7 @@ class TranscriptionEngine:
         except ImportError:
             raise RuntimeError("faster-whisper is required. Install with: pip install faster-whisper")
         except Exception as e:
+            print(f"[Status] error|{str(e)[:200]}", flush=True)
             print(f"[Whisper] Failed to load model: {e}")
             raise
 
@@ -747,6 +797,20 @@ class TranslationEngine:
         )
 
         if fast_mode:
+            # Partial alt yazılar için önce hızlı DeepL (latency_optimized) denenir;
+            # Argos sadece fallback'tir çünkü çeviri kalitesi belirgin şekilde düşüktür.
+            if self.source_lang.lower() != "fi":
+                result = self.deepl_translator.translate(
+                    protected_text,
+                    context=protected_context,
+                    model_type="latency_optimized",
+                )
+                if result:
+                    result = self._restore_terms(result, replacements)
+                    if result.strip().lower() != text_stripped.lower():
+                        self.last_provider = "deepl-fast"
+                        return result
+
             if self.translator:
                 try:
                     result = self.translator.translate(protected_text)
@@ -931,8 +995,9 @@ class SubtitleEngine:
         self._azure_speech = AzureSpeechTranslationClient(None)
         self._listening_epoch = 0
 
-        # Cümle biriktirme sistemi
-        self._sentence_buffer: list = []  # Biriken cümleler
+        # Cümle biriktirme sistemi: timeout kesintisinde yarım kalan
+        # cümle parçaları burada birikir, cümle tamamlanınca birleştirilir.
+        self._sentence_buffer: list[str] = []
         self._silence_threshold = 0.35  # Faster finalize for real-time subtitles
         self._current_speech_audio: list = []  # Şu anki konuşma sesi
         self._audio_lock = threading.Lock()  # Thread safety lock
@@ -1245,9 +1310,10 @@ class SubtitleEngine:
         last_partial_text = ""
         last_context = ""  # Hafıza (Önceki cümle)
 
-        # Maksimum segment süresi (saniye) - Çok uzarsa kesip yeni satıra geçsin
-        # Maksimum segment süresi (saniye) - Çok uzarsa kesip yeni satıra geçsin
-        MAX_SEGMENT_DURATION = 3.0
+        # Maksimum segment süresi (saniye). Uzun konuşmalarda cümle ortası
+        # kesilmesin diye yüksek tutulur; yine de kesilirse parça bir sonraki
+        # transkripsiyonla birleştirilir (bkz. _sentence_buffer).
+        MAX_SEGMENT_DURATION = 6.0
 
         while self._running:
             # Wait for event
@@ -1292,8 +1358,26 @@ class SubtitleEngine:
             is_final = is_silence_final or is_timeout_final
 
             # 4. Prepare Audio
+            # CPU tasarrufu: canlı (partial) transkripsiyonda yalnızca son ~5 saniyeyi
+            # işle — konuşma devam ederken buffer uzadıkça Whisper maliyeti artmasın.
+            # Final transkripsiyonda tam buffer kullanılır (cümle bütünlüğü için).
             try:
-                audio = np.concatenate(current_audio_copy)
+                if not is_final and self.config.streaming_mode:
+                    max_partial_samples = int(self.config.sample_rate * 5.0)
+                    total_samples_buf = sum(len(c) for c in current_audio_copy)
+                    if total_samples_buf > max_partial_samples:
+                        keep_reversed = []
+                        acc_samples = 0
+                        for chunk in reversed(current_audio_copy):
+                            keep_reversed.append(chunk)
+                            acc_samples += len(chunk)
+                            if acc_samples >= max_partial_samples:
+                                break
+                        audio = np.concatenate(list(reversed(keep_reversed)))
+                    else:
+                        audio = np.concatenate(current_audio_copy)
+                else:
+                    audio = np.concatenate(current_audio_copy)
             except ValueError:
                 continue
 
@@ -1334,7 +1418,32 @@ class SubtitleEngine:
                     )
                     with self._audio_lock:
                         self._current_speech_audio.clear()
+                    self._sentence_buffer.clear()
                 continue
+
+            # 5.6. Sentence integrity: if a max-duration cut landed mid-sentence,
+            # keep the fragment and merge it with the next transcription instead of
+            # showing a broken half-sentence as final.
+            if is_final and is_timeout_final and not _ends_with_sentence_punctuation(text):
+                if len(self._sentence_buffer) < 5:
+                    self._sentence_buffer.append(text)
+                else:
+                    # Güvenlik sınırı: çok uzun tek parça olmasın, yine de yayınla
+                    self._sentence_buffer.clear()
+                    self._sentence_buffer.append(text)
+                with self._audio_lock:
+                    if processing_epoch == self._listening_epoch:
+                        del self._current_speech_audio[:processed_count]
+                    else:
+                        self._current_speech_audio.clear()
+                last_partial_text = text
+                self._last_transcript_time = now
+                continue
+
+            if is_final and self._sentence_buffer:
+                # Birikmiş yarım cümle parçaları tam cümleyle birleştirilir
+                text = " ".join([*self._sentence_buffer, text]).strip()
+                self._sentence_buffer.clear()
 
             # 6. Translate (language matched)
             translated = self.translator.translate(
@@ -1437,6 +1546,7 @@ class SubtitleEngine:
         self.audio_capture.start()
 
         print("[Engine] Started successfully. Listening for audio...")
+        print("[Status] listening", flush=True)
 
     def stop(self):
         """Stop the engine"""
