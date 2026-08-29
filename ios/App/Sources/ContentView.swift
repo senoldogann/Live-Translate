@@ -4,6 +4,7 @@ struct ContentView: View {
     @EnvironmentObject private var viewModel: SubtitleViewModel
     @State private var showSettings = false
     @State private var showHistory = false
+    @State private var showDiagnostics = false
 
     var body: some View {
         ZStack {
@@ -48,6 +49,9 @@ struct ContentView: View {
         .sheet(isPresented: $showHistory) {
             TranscriptHistoryView(viewModel: viewModel)
         }
+        .sheet(isPresented: $showDiagnostics) {
+            DiagnosticsView()
+        }
     }
 
     private var header: some View {
@@ -67,6 +71,13 @@ struct ContentView: View {
                     .font(.title3)
             }
             .accessibilityLabel("Geçmiş")
+            Button {
+                showDiagnostics = true
+            } label: {
+                Image(systemName: "stethoscope")
+                    .font(.title3)
+            }
+            .accessibilityLabel("Tanılama")
             Button {
                 showSettings = true
             } label: {

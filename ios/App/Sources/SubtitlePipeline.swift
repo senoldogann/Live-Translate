@@ -52,7 +52,10 @@ final class SubtitlePipeline: ObservableObject {
 
     public func start() async {
         guard !isListening else { return }
+        DebugLog.shared.clear()
+        DebugLog.shared.log("başlat: izin isteniyor")
         guard await AudioSessionManager.requestPermission() else {
+            DebugLog.shared.log("başlat: MİKROFON İZNİ REDDEDİLDİ")
             phase = .failed("Mikrofon izni gerekli. Ayarlar → Gizlilik → Mikrofon.")
             return
         }
@@ -60,13 +63,20 @@ final class SubtitlePipeline: ObservableObject {
         guard let modelURL = await ensureModel() else { return }
 
         phase = .loadingModel
+        DebugLog.shared.log("model yükleniyor: \(modelURL.lastPathComponent)")
         let loadResult = await Task.detached(priority: .userInitiated) { [stt] in
             stt.loadModel(at: modelURL)
         }.value
         guard case .success = loadResult else {
+            DebugLog.shared.log("model YÜKLENEMEDİ")
             phase = .failed("Whisper modeli yüklenemedi.")
             return
         }
+        DebugLog.shared.log("model yüklendi ✓ (gpu=\(STTEngine.usesGPU ? "açık" : "kapalı"))")
+
+        // Sanity: log the selected source language — a common cause of silent
+        // drops is a fixed source language mismatching the detected one.
+        DebugLog.shared.log("kaynak dil: \(settings.sourceLanguage == "auto" ? "otomatik" : settings.sourceLanguage)")
 
         do {
             let audio = try AudioSessionManager()
@@ -75,13 +85,16 @@ final class SubtitlePipeline: ObservableObject {
             }
             try audio.start()
             self.audio = audio
+            DebugLog.shared.log("ses motoru başladı ✓ (16kHz mono)")
         } catch {
+            DebugLog.shared.log("ses motoru BAŞLATILAMADI: \(error.localizedDescription)")
             phase = .failed(error.localizedDescription)
             return
         }
 
         isListening = true
         phase = .listening
+        DebugLog.shared.log("dinleme başladı — altyazı bekleniyor")
         model.start()
         await LiveActivityManager.shared.start(
             sourceLanguage: sourceLanguageOrNil ?? "auto",
@@ -99,6 +112,7 @@ final class SubtitlePipeline: ObservableObject {
     }
 
     public func stop() {
+        DebugLog.shared.log("durdu — oturum sonlandı")
         processingTask?.cancel()
         processingTask = nil
         audio?.stop()
@@ -126,13 +140,28 @@ final class SubtitlePipeline: ObservableObject {
 
     // MARK: - Audio handling
 
+    private var lastVADLogTime = Date.distantPast
+
     private func handleAudioChunk(_ chunk: [Float]) {
+        let rms = PCMUtils.rms(chunk)
+        let isSpeech = vad.isSpeech(chunk)
         bufferLock.lock()
-        if vad.isSpeech(chunk) {
+        if isSpeech {
             speechBuffer.append(contentsOf: chunk)
             lastSpeechTime = Date()
         }
         bufferLock.unlock()
+        // Diagnostics: rate-limit to ~1 line/second so the ring buffer isn't
+        // flooded at the ~50-100 Hz chunk cadence. The rms value tells us
+        // whether the mic is live at all vs. the VAD rejecting the level.
+        let now = Date()
+        guard now.timeIntervalSince(lastVADLogTime) > 1.0 else { return }
+        lastVADLogTime = now
+        if isSpeech {
+            DebugLog.shared.log(String(format: "VAD: ses (rms=%.3f)", rms))
+        } else {
+            DebugLog.shared.log(String(format: "VAD: SESSİZ/eşik altı (rms=%.3f)", rms))
+        }
     }
 
     private func clearBuffer() {
@@ -154,6 +183,9 @@ final class SubtitlePipeline: ObservableObject {
 
         let duration = Double(buffer.count) / 16000.0
         guard duration >= minAudioDuration else { return }
+
+        // Diagnostics: if this fires repeatedly with no whisper output, the VAD
+        // is rejecting the mic level (see the VAD: ses/kesme lines above).
 
         // Rate limit partial passes.
         let now = Date()
@@ -184,6 +216,7 @@ final class SubtitlePipeline: ObservableObject {
 
         let text = transcription.text
         guard !text.isEmpty else {
+            DebugLog.shared.log("whisper: boş metin (durum=ok, final=\(isFinal), süre=\(String(format: "%.2f", duration))s)")
             if isFinal { clearBuffer() }
             return
         }
@@ -192,9 +225,12 @@ final class SubtitlePipeline: ObservableObject {
         if let detected = transcription.language,
            let selected = sourceLanguageOrNil,
            detected != selected {
+            DebugLog.shared.log("DİL UYUMSUZLUĞU: algılanan='\(detected)' seçili='\(selected)' — atlandı (final=\(isFinal))")
             if isFinal { clearBuffer() }
             return
         }
+
+        DebugLog.shared.log("whisper: '\(text)' (final=\(isFinal), dil=\(transcription.language ?? "?"))")
 
         guard let published = assembler.process(text: text, isFinal: isFinal, isTimeoutCut: isTimeoutFinal) else {
             if isFinal { clearBuffer() }
@@ -214,6 +250,7 @@ final class SubtitlePipeline: ObservableObject {
         lastTranscriptTime = Date()
         if isFinal {
             clearBuffer()
+            DebugLog.shared.log(String(format: "cümle tamamlandı ✓ (toplam %.1fs)", duration))
         }
     }
 

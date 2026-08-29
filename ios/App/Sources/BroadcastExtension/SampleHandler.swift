@@ -31,6 +31,9 @@ final class SampleHandler: RPBroadcastSampleHandler {
             // Relay to the main app through the App Group container.
             SegmentRelay.append(RelaySegment(segment: segment))
         }
+        client.onStateChange = { state in
+            DebugLog.shared.log("yayın LTS durumu: \(state)")
+        }
         client.onError = { [weak self] message in
             self?.fail("LTS bağlantı hatası: \(message)")
         }
