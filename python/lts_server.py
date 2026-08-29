@@ -178,10 +178,7 @@ class LTSSession:
         if now - self._last_transcript_time < self.processing_interval:
             return []
 
-        is_silence_final = (
-            self._last_speech_time is not None
-            and now - self._last_speech_time >= self.silence_threshold
-        )
+        is_silence_final = self._last_speech_time is not None and now - self._last_speech_time >= self.silence_threshold
         is_timeout_final = duration > self.max_segment_duration
         is_final = bool(is_silence_final or is_timeout_final)
 
@@ -198,9 +195,7 @@ class LTSSession:
         if not is_final and not self.streaming:
             return []
 
-        text, confidence, detected_lang = self.transcriber.transcribe(
-            audio, SAMPLE_RATE, prompt=self.last_context
-        )
+        text, confidence, detected_lang = self.transcriber.transcribe(audio, SAMPLE_RATE, prompt=self.last_context)
         text = (text or "").strip()
         if not text:
             if is_final:
@@ -294,6 +289,7 @@ class LTSServer:
         config: LTSConfig,
         transcriber_factory: Callable[[], Any] | None = None,
         translator_factory: Callable[[str, str], Any] | None = None,
+        vad_factory: Callable[[], Any] | None = None,
     ):
         self.config = config
         self._transcriber_factory = transcriber_factory or (
@@ -307,6 +303,7 @@ class LTSServer:
         self._translator_factory = translator_factory or (
             lambda src, tgt: TranslationEngine(source_lang=src, target_lang=tgt)
         )
+        self._vad_factory = vad_factory
         self._transcriber: Any = None
         self._translator: Any = None
 
@@ -342,10 +339,9 @@ class LTSServer:
                 translator=self._translator,
                 source_lang=source_lang,
                 target_lang=target_lang,
+                vad=self._vad_factory() if self._vad_factory else None,
             )
-            await websocket.send(
-                json.dumps({"type": "ready", "model": self.config.whisper_model})
-            )
+            await websocket.send(json.dumps({"type": "ready", "model": self.config.whisper_model}))
 
             # ``stop`` lets both loops exit when the client disconnects; the
             # serve() context manager waits for the handler to return, so an

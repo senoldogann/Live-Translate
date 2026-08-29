@@ -235,6 +235,7 @@ class LTSWebSocketTests(unittest.TestCase):
                 config,
                 transcriber_factory=FakeTranscriber,
                 translator_factory=lambda src, tgt: FakeTranslator(),
+                vad_factory=EnergyVAD,
             )
             async with websockets.serve(server.handle, "127.0.0.1", 0) as ws_server:
                 port = ws_server.sockets[0].getsockname()[1]
