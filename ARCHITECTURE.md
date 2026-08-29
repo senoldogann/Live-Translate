@@ -1,14 +1,12 @@
-# 🏗️ System Architecture: Stealth Subtitle Translator
+# System Architecture
 
-> **Technical Deep Dive & Internals**
+Bu doküman, projenin iç yapısını, süreçler arası haberleşmeyi, kullanılan AI modellerini
+ve "Stealth" mekanizmasının nasıl çalıştığını teknik detaylarıyla açıklar.
 
-Bu doküman, projenin iç yapısını, modüller arası haberleşmeyi (IPC), kullanılan AI modellerini ve "Stealth" mekanizmasının çalışma prensibini teknik detaylarıyla açıklar.
+## Genel Bakış
 
----
-
-## 🧭 High-Level Overview
-
-Proje, **Electron (Node.js)** ve **Python** olmak üzere iki ana process grubundan oluşan hibrit bir mimariye sahiptir.
+Uygulama iki ana process grubundan oluşan hibrit bir mimariye sahiptir: **Electron (Node.js)**
+arayüzü ve **Python** tarafında çalışan AI engine'i.
 
 ```mermaid
 graph TB
@@ -29,7 +27,7 @@ graph TB
         Azure[Azure Speech Translation]
         Deepgram[Deepgram Fallback]
         Whisper[Faster-Whisper]
-        VAD[Silencio VAD]
+        VAD[WebRTC VAD]
         ZMQ_Pub[ZMQ Publisher]
     end
 
@@ -39,88 +37,102 @@ graph TB
     App -->|Events| Main
 ```
 
----
+## 1. AI Core (Python Engine)
 
-## 🧠 1. AI Core (Python Engine)
-
-Tüm yapay zeka işlemleri `python/engine.py` içinde, Electron ana sürecinden bağımsız bir *child process* olarak çalışır.
+Tüm yapay zeka işlemleri `python/engine.py` içinde, Electron ana sürecinden bağımsız bir
+*child process* olarak çalışır.
 
 ### Teknoloji Yığını
-*   **Cloud Translation Engine:** `Azure Speech Translation` ana motor olarak kullanılır. Aynı stream içinde preview (`recognizing`) ve final (`recognized`) çeviri üretir.
-*   **Cloud Fallback:** `Deepgram` yalnızca Azure kimlik bilgileri yoksa veya Azure unavailable ise devreye girer.
-*   **Local STT Engine:** `faster-whisper` (CTranslate2 backend). `small` model varsayılan olarak seçilmiştir. Apple Silicon üzerinde `int8` quantization ile çalışır.
-*   **VAD (Voice Activity Detection):** `webrtcvad`. Sessizlik eşiği 400ms'ye indirilerek daha tepkisel hale getirilmiştir.
-*   **Translation Layer:**
-    *   *Tier 1 (Premium):* DeepL API. Yerel modda daha iyi kalite sağlar; kullanilamazsa metin passthrough olarak yayinlanir.
-*   **Logic Controllers:**
-    *   *Anti-Loop Filter:* Whisper'ın halüsinasyonlarını (sonsuz döngüleri) tespit edip temizleyen 3-gram filtresi.
-    *   *Latency Optimizer:* Buffer sürelerini dinamik yöneterek (Max 5s) gecikmeyi minimize eder.
 
-### Modes & Threading
-İki farklı çalışma modu mevcuttur:
-1.  **Fast Mode (Streaming):** Preview akışı daha agresiftir; konuşmacıya yetişmek için erken parça yayınlar.
-2.  **Stable Mode (Strict):** Final commit odaklıdır; daha az zıplar, daha rahat okunur.
+- **Cloud STT:** Azure Speech Translation ana motor; Deepgram yalnızca Azure kimlik
+  bilgileri yoksa veya Azure kullanılamıyorsa devreye girer.
+- **Local STT:** `faster-whisper` (CTranslate2 backend). Varsayılan model `small`;
+  Apple Silicon'da `int8` quantization ile çalışır. Boyut (tiny/base/small/medium) kurulum
+  sihirbazından seçilebilir.
+- **VAD (Voice Activity Detection):** `webrtcvad` (kurulu değilse enerji tabanlı fallback).
+  Sessizlik eşiği 350 ms — cümle bittikten sonra transkripsiyonu hızlıca finalize eder.
+- **Çeviri katmanı:** DeepL API (önerilen, en kaliteli) → çevrimdışı Argos fallback.
+  Canlı (partial) çevirilerde hızlı `latency_optimized` mod, cümle finalinde kaliteli
+  `prefer_quality_optimized` mod kullanılır.
+- **Koruma mekanizmaları:**
+  - *Anti-loop filtresi:* Whisper'ın tekrar eden ifadelerini (örn. "on and on and on")
+    tespit edip temizler.
+  - *Cümle bütünlüğü:* Segment 6 saniyeyi aşarsa yarım kalan parça biriktirilir ve bir
+    sonraki transkripsiyonla birleştirilir; altyazı bölünmüş cümle göstermez.
+  - *CPU tasarrufu:* Canlı (partial) transkripsiyonlarda yalnızca son ~5 saniyelik ses
+    işlenir; final transkripsiyonlar tam buffer kullanır.
 
-Threading Model:
-1.  `_audio_thread`: BlackHole'dan ham ses verisini okur.
-2.  `_process_thread`: VAD, STT ve Çeviri işlemlerini yoğun işlemci gücüyle yönetir.
+### Modlar
 
+- **Streaming (kelime modu, varsayılan):** Konuşmacı konuşurken kelime kelime canlı
+  altyazı yayınlanır, cümle bitince netleşir.
+- **Stable (cümle modu):** Yalnızca cümle tamamlanınca altyazı gösterilir; daha az
+  zıplama, daha sakin okuma.
 
-## ⚡ 2. IPC & Communication (ZeroMQ)
+### Threading
 
-Standart `stdio` (stdin/stdout) iletişimi yüksek frekanslı ses verisi akışı için yetersiz kalacağından, endüstri standardı **ZeroMQ (ZMQ)** tercih edilmiştir.
+1. Ses callback'i (`sounddevice`): BlackHole'dan ham ses parçalarını toplar.
+2. `_process_thread`: VAD, STT ve çeviriyi yönetir; `_process_event` ile uyandırılır.
+3. `_command_thread`: Electron'dan gelen yapılandırma komutlarını dinler (HMAC imzalı).
+
+## 2. IPC & Haberleşme (ZeroMQ)
+
+Yüksek frekanslı ses/transkript akışı için standart `stdio` yerine **ZeroMQ (ZMQ)**
+kullanılır.
 
 ### Protocol
-*   **Pattern:** Publisher-Subscriber (PUB/SUB)
-*   **macOS Transport:** Her Electron oturumu için ayrı Unix-domain socket çifti (`ipc:///...`).
-*   **Fallback Transport:** macOS olmayan platformlarda `tcp://127.0.0.1:5555/5556`.
-*   **Integrity:** Zarflar `v:1`, payload, `ts` ve HMAC-SHA256 imzası taşir; iki taraf da zaman ve tekrar kontrolu yapar.
-*   **Format:**
-    ```text
-    [TRANSCRIPT] {"original": "Hello", "translated": "Merhaba", "is_final": false}
-    [AUDIO_LEVEL] 0.54
-    ```
 
-Electron Main process bu portu dinler (`zmq.SUB`) ve gelen veriyi parse edip `mainWindow.webContents.send()` ile React arayüzüne iletir.
+- **Pattern:** Publisher-Subscriber (PUB/SUB).
+- **macOS transport:** Her oturum için ayrı Unix-domain socket çifti; macOS dışında
+  `tcp://127.0.0.1:5555/5556` fallback.
+- **Bütünlük:** Zarflar `v:1`, payload, `ts` ve HMAC-SHA256 imzası taşır; iki taraf da
+  zaman penceresi ve tekrar kontrolü yapar.
+- **Format örneği:**
+  ```text
+  [TRANSCRIPT] {"original": "Hello", "translated": "Merhaba", "isFinal": false}
+  [AUDIO_LEVEL] 0.54
+  [Status] downloading_model|small|460
+  ```
 
----
+Electron main process ZMQ subscriber'ı dinler; gelen transkriptleri parse edip
+`mainWindow.webContents.send()` ile React arayüzüne iletir. Engine durum mesajları
+(`[Status]`) aynı kanaldan `engine-status` IPC olayına çevrilir.
 
-## 🛡️ 3. Stealth Mechanism (The Ghost Protocol)
+## 3. Stealth Mekanizması
 
-Uygulamanın en kritik özelliği olan "Görünmezlik", macOS Window Server seviyesindeki hook'lar ile sağlanır.
-
-### `NSWindowSharingNone`
-`electron/main.ts` dosyasında şu çağrı sihirli dokunuşu yapar:
+Uygulamanın en kritik özelliği: ekran paylaşımından görünmez olma. macOS Window Server
+seviyesindeki pencere paylaşım koruması ile sağlanır.
 
 ```typescript
 mainWindow.setContentProtection(true);
 ```
 
-Bu Electron API'si, arkaplanda macOS'un native pencere paylaşım korumasını açar. Bu şu anlama gelir:
-*   Pencere framebuffer'a çizilir (Kullanıcı görür).
-*   Ancak `CGWindowListCreateImage` gibi ekran yakalama API'leri bu pencereyi **render etmeyi reddeder** (Şeffaf veya yok sayılır).
-*   Sonuç: Zoom, Teams, OBS, QuickTime, Screenshot araçları pencereyi göremez.
+Bu API, macOS'un native pencere paylaşım korumasını açar:
 
-Not: Varsayılan açılış modu artık görünürdür. Kullanıcı Stealth düğmesine basınca bu koruma açılır; screenshot almak için görünür modda kalmak gerekir.
+- Pencere framebuffer'a çizilir (kullanıcı görür).
+- `CGWindowListCreateImage` gibi ekran yakalama API'leri bu pencereyi render etmez.
+- Sonuç: Zoom, Teams, OBS, QuickTime ve ekran görüntüsü araçları pencereyi göremez.
 
----
+Varsayılan açılış modu görünürdür; kullanıcı Stealth düğmesine basınca koruma açılır.
+Ekran görüntüsü almak için görünür modda kalmak gerekir.
 
-## 👆 4. Interactive Click-Through (Smart Overlay)
+## 4. Interactive Click-Through
 
-Pencere tam ekran (`fullscreen`) olsa da, kullanıcı arkadaki uygulamalara (örn. Browser, IDE) tıklayabilmelidir. Ancak altyazı metnini seçebilmesi veya butonlara basabilmesi de gerekir.
+Pencere ekranı kaplasa da kullanıcı arkadaki uygulamalara tıklayabilmelidir; aynı anda
+altyazıya tıklayıp butonlara basabilmesi de gerekir. Bu paradoks `useInteractiveZones`
+hook'u ile çözülür:
 
-Bu paradoks `useInteractiveZones` hook'u ile çözülmüştür:
+1. React tarafı düzenli aralıklarla buton ve metinlerin koordinatlarını hesaplar.
+2. Koordinatlar IPC ile main process'e gönderilir.
+3. Main process, bu koordinatlar **dışındaki** alanı
+   `setIgnoreMouseEvents(true, { forward: true })` yapar — boşluk tıklamaları arkadaki
+   pencereye düşer, etkileşimli öğeler normal çalışır.
 
-1.  **Polling:** React tarafı düzenli aralıklarla butonların ve metinlerin koordinatlarını (`rect`) hesaplar.
-2.  **IPC Sync:** Bu koordinatları Main process'e gönderir.
-3.  **Hole Punching:** Main process, bu koordinatlar **dışındaki** her yeri `setIgnoreMouseEvents(true, { forward: true })` yapar.
+## Test Stratejisi
 
-Böylece; butonun üzerine gelince mouse olaylarını Electron yakalar, boşluğa gelince tıklama arkadaki pencereye "düşer" (pass-through).
-
----
-
-## 🧪 Testing Strategy
-
-*   **Unit Tests:** Vitest + JSDOM (`src/__tests__`). UI bileşenlerinin ve mantığının testi.
-*   **E2E (Planned):** Playwright Electron desteği ile tam entegrasyon testi.
-*   **Security Audit:** OWASP standartlarına göre `webSecurity`, `contextIsolation` kontrolleri.
+- **Unit testler:** Vitest + JSDOM (`src/__tests__`, `src/components/__tests__`).
+- **E2E smoke test:** Playwright + Electron (`e2e/smoke.spec.ts`) — uygulama boot olur,
+  pencere açılır.
+- **CI:** GitHub Actions — type check, unit test, `npm audit`, `pip-audit`, ruff lint/format.
+- **Güvenlik kontrolleri:** `contextIsolation`, sandbox ve `webSecurity` prod build'lerde
+  açıktır.
