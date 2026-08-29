@@ -28,11 +28,40 @@ jobs:
       - name: TypeScript type check
         run: npm run typecheck
 
-      - name: Run tests
-        run: npm test -- --run --reporter=verbose
+      - name: Run tests with coverage
+        run: npm run test:coverage
 
       - name: Build
         run: npm run build
+
+  python-tests:
+    name: Python Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Install test dependencies
+        run: |
+          pip install pytest pytest-cov
+
+      - name: Install runtime dependencies
+        run: pip install -r python/requirements.txt
+
+      - name: Run pytest suite
+        working-directory: python
+        run: |
+          python -m pytest test_engine_unit.py test_translation_terms.py \
+            test_azure_integration.py test_deepgram_buffering.py \
+            --cov=engine --cov=azure_translation_engine --cov=deepgram_engine \
+            --cov-report=term-missing --cov-fail-under=35
 
   security-audit:
     name: Security Audit

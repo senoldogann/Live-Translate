@@ -1,9 +1,13 @@
 import os
+import sys
 import threading
 import time
 import unittest
+from pathlib import Path
 
-from python.deepgram_engine import DeepgramWSClient
+sys.path.insert(0, str(Path(__file__).parent))
+
+from deepgram_engine import DeepgramWSClient
 
 
 class FakePublisher:
