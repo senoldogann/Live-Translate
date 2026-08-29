@@ -84,16 +84,30 @@ struct SettingsView: View {
     // MARK: - Language
 
     private var languageSection: some View {
-        Section {
-            Picker("Konuşma dili", selection: $settings.sourceLanguage) {
-                ForEach(AppSettings.languageOptions, id: \.id) { lang in
-                    Text(lang.displayName).tag(lang.id)
+        Group {
+            Section {
+                Picker("Konuşma dili", selection: $settings.sourceLanguage) {
+                    ForEach(AppSettings.languageOptions, id: \.id) { lang in
+                        Text(lang.displayName).tag(lang.id)
+                    }
                 }
+            } header: {
+                Text("Dil")
+            } footer: {
+                Text("Otomatik algıla seçilirse dil her cümlede tespit edilir. Belirli bir dil seçerseniz başka diller yoksayılır.")
             }
-        } header: {
-            Text("Dil")
-        } footer: {
-            Text("Otomatik algıla seçilirse dil her cümlede tespit edilir. Belirli bir dil seçerseniz başka diller yoksayılır.")
+
+            Section {
+                Picker("Çeviri dili", selection: $settings.targetLanguage) {
+                    ForEach(AppSettings.languageOptions.filter { $0.id != "auto" }, id: \.id) { lang in
+                        Text(lang.displayName).tag(lang.id)
+                    }
+                }
+            } header: {
+                Text("Hedef Dil")
+            } footer: {
+                Text("Hedef dil, kilit ekranı canlı etkinliğinde gösterilir. Çeviri bulut modunda etkinleşince kullanılacak.")
+            }
         }
     }
 

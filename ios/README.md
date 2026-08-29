@@ -13,6 +13,10 @@ Mikrofon → VAD → whisper.cpp (cihazda, offline) → cümle birleştirme → 
   yeniden yazılmaz), ayarlardan yazı boyutu / arka plan opaklığı.
 - ✅ Model yönetimi: `tiny` (~75 MB) ve `base` (~142 MB) HuggingFace'ten uygulama
   içinden indirilir, Application Support'da önbelleğe alınır.
+- ✅ **Faz 2 — Live Activity**: dinlerken kilit ekranı + Dynamic Island'da canlı
+  çeviri (`SubtitleLiveActivity` widget extension). Uygulama arka plana alınsa da
+  mikrofon (`UIBackgroundModes: audio`) ve Activity güncellemeleri devam eder;
+  partial güncellemeler 2 saniyede bir bütçeye uyumlu şekilde throttl'lanır.
 
 ## Repo yapısı
 

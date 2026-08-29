@@ -33,11 +33,13 @@ Mevcut macOS çekirdeği (engine.py) çok platformlu sunucuda yeniden kullanıl�
 
 **Amaç:** Kilit ekranı + Dynamic Island'da canlı çeviri (arka planda iken).
 
-- [ ] **2.1** ActivityKit widget + Attributes/ContentState modelleri
-- [ ] **2.2** LiveSubtitleModel → Activity güncelleme köprüsü (Activity<...> push)
-- [ ] **2.3** Kilit ekranı UI: son cümle + çeviri satırı
-- [ ] **2.4** Arka plan davranışı: mikrofon devam ederken Activity günceller
+- [x] **2.1** ActivityKit widget + Attributes/ContentState modelleri — `LiveSubtitleAttributes` + widget extension
+- [x] **2.2** LiveSubtitleModel → Activity güncelleme köprüsü (Activity<...> push) — `LiveActivityManager` + pipeline wiring
+- [x] **2.3** Kilit ekranı UI: son cümle + çeviri satırı — Lock Screen + Dynamic Island (compact/expanded)
+- [x] **2.4** Arka plan davranışı: mikrofon devam ederken Activity günceller — `UIBackgroundModes: audio` + `NSSupportsLiveActivitiesFrequentUpdates` + partial throttle (2s)
 - [ ] **2.5** Test: uygulama arka planda iken kilit ekranında canlı çeviri
+
+**Not:** Deployment target 16.2'ye çıkarıldı — iOS 26 SDK, 16.1'in senkron ActivityKit API'lerini kaldırdı; async (16.2+) API'ler kullanılıyor. Cihaz kapsamı 16.1 ile aynıdır.
 
 ### Faz 3 — Broadcast Extension + Bulut STT + PiP (2-3 hafta)
 

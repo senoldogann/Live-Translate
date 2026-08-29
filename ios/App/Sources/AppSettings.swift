@@ -7,6 +7,7 @@ enum AppSettings {
 
     enum Key {
         static let sourceLanguage = "settings.sourceLanguage"
+        static let targetLanguage = "settings.targetLanguage"
         static let whisperModel = "settings.whisperModel"
         static let fontSize = "settings.fontSize"
         static let backgroundOpacity = "settings.backgroundOpacity"
@@ -61,6 +62,7 @@ enum AppSettings {
     // MARK: - Defaults
 
     static let defaultSourceLanguage = "auto"
+    static let defaultTargetLanguage = "tr"
     static let defaultWhisperModel = "tiny"
     static let defaultFontSize: Double = 26
     static let defaultBackgroundOpacity: Double = 0.55
@@ -79,6 +81,9 @@ enum AppSettings {
 final class ObservableSettings: ObservableObject {
     @AppStorage(AppSettings.Key.sourceLanguage)
     var sourceLanguage: String = AppSettings.defaultSourceLanguage
+
+    @AppStorage(AppSettings.Key.targetLanguage)
+    var targetLanguage: String = AppSettings.defaultTargetLanguage
 
     @AppStorage(AppSettings.Key.whisperModel)
     var whisperModel: String = AppSettings.defaultWhisperModel
