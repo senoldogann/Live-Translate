@@ -8,12 +8,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 
-const PARTIAL_SEED_WORDS = 1;
+const PARTIAL_SEED_WORDS = 2;
 const PARTIAL_STEP_WORDS = 1;
-const PARTIAL_REVEAL_DELAY_MS = 28;
+const PARTIAL_REVEAL_DELAY_MS = 48;
 const FINAL_SEED_WORDS = 2;
 const FINAL_STEP_WORDS = 2;
-const FINAL_REVEAL_DELAY_MS = 18;
+const FINAL_REVEAL_DELAY_MS = 20;
 
 interface SubtitleOverlayProps {
     original?: string;
@@ -83,19 +83,35 @@ function SubtitleOverlay({
         const seedWords = isFinal ? FINAL_SEED_WORDS : PARTIAL_SEED_WORDS;
         const stepWords = isFinal ? FINAL_STEP_WORDS : PARTIAL_STEP_WORDS;
         const delayMs = isFinal ? FINAL_REVEAL_DELAY_MS : PARTIAL_REVEAL_DELAY_MS;
-        let nextVisibleCount = Math.min(visibleWordCountRef.current, sharedPrefix, targetWords.length);
 
-        if (nextVisibleCount === 0) {
-            nextVisibleCount = Math.min(seedWords, targetWords.length);
+        let nextVisibleCount: number;
+
+        if (isFinal) {
+            // Final cümle bir kez gelir ve sabittir; klasik seed+adım reveal kullan.
+            nextVisibleCount = Math.min(visibleWordCountRef.current, sharedPrefix, targetWords.length);
+            if (nextVisibleCount === 0) {
+                nextVisibleCount = Math.min(seedWords, targetWords.length);
+            }
+        } else {
+            // Partial modda görünen kelime sayısını ASLA azaltma: hızlı konuşmada
+            // Whisper önceki kelimeleri yeniden yazınca metnin "silinip baştan
+            // yazılması" hissi oluşuyordu. Ortak öneki koru, sadece yeni kelimeleri ekle.
+            nextVisibleCount = Math.max(
+                visibleWordCountRef.current,
+                Math.min(sharedPrefix, targetWords.length)
+            );
+        }
+
+        if (nextVisibleCount >= targetWords.length) {
+            previousTargetWordsRef.current = targetWords;
+            visibleWordCountRef.current = targetWords.length;
+            setVisibleTranslated(targetWords.join(' '));
+            return;
         }
 
         previousTargetWordsRef.current = targetWords;
         visibleWordCountRef.current = nextVisibleCount;
         setVisibleTranslated(targetWords.slice(0, nextVisibleCount).join(' '));
-
-        if (nextVisibleCount >= targetWords.length) {
-            return;
-        }
 
         revealTimerRef.current = window.setInterval(() => {
             nextVisibleCount = Math.min(targetWords.length, nextVisibleCount + stepWords);
