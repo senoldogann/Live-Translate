@@ -16,17 +16,18 @@ Mevcut macOS çekirdeği (engine.py) çok platformlu sunucuda yeniden kullanıl�
 
 **Amaç:** Çalışan ilk dikey dilim: mikrofon → lokal whisper.cpp → uygulama içi canlı altyazı.
 
-- [ ] **1.1** Xcode projesi + SwiftUI App + workspace kurulumu (minimum iOS 16.1)
-- [ ] **1.2** `LiveSubtitleModel` (saf Swift, test edilebilir): partial/final durumu, cümle birleştirme
-- [ ] **1.3** `SentenceAssembler`: macOS'tan taşınan cümle birleştirme mantığı (Swift port)
-- [ ] **1.4** `AudioSessionManager`: mikrofon izni + AVAudioEngine PCM 16kHz mono yakalama
-- [ ] **1.5** `STTEngine`: whisper.cpp SPM entegrasyonu + `tiny`/`base` model yönetimi
-- [ ] **1.6** Altyazı UI: glassmorphism görünümü, karaoke kelime vurgusu, font/opaklık
-- [ ] **1.7** Ayarlar ekranı: dil çifti, model boyutu, görünüm tercihleri
-- [ ] **1.8** Birim testleri: LiveSubtitleModel + SentenceAssembler (sentetik PCM)
+- [x] **1.1** Xcode projesi + SwiftUI App + workspace kurulumu (minimum iOS 16.1) — `ios/App` (XcodeGen)
+- [x] **1.2** `LiveSubtitleModel` (saf Swift, test edilebilir): partial/final durumu, cümle birleştirme
+- [x] **1.3** `SentenceAssembler`: macOS'tan taşınan cümle birleştirme mantığı (Swift port)
+- [x] **1.4** `AudioSessionManager`: mikrofon izni + AVAudioEngine PCM 16kHz mono yakalama
+- [x] **1.5** `STTEngine`: whisper.cpp entegrasyonu (XCFramework) + `tiny`/`base` model yönetimi
+- [x] **1.6** Altyazı UI: glassmorphism görünümü, karaoke kelime vurgusu, font/opaklık
+- [x] **1.7** Ayarlar ekranı: dil çifti, model boyutu, görünüm tercihleri
+- [x] **1.8** Birim testleri: LiveSubtitleModel + SentenceAssembler (sentetik PCM) — 35 test
 - [ ] **1.9** Gerçek cihaz doğrulama: mikrofonla canlı çeviri akışı
 
 **Çıkış:** `TestFlight`'ta çalışan mikrofon çevirisi; gecikme < 3 sn.
+**Durum:** 1.1–1.8 tamam (simulator build + launch doğrulandı). 1.9 gerçek cihaz + TestFlight gerektirir.
 
 ### Faz 2 — Live Activity (1 hafta)
 

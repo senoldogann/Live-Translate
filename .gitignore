@@ -37,6 +37,23 @@ scripts/__pycache__/
 # Whisper models (large files)
 .cache/whisper/
 
+# iOS (Swift)
+# SwiftPM build artifacts
+ios/Core/.build/
+# Generated Xcode project (regenerate with: cd ios/App && xcodegen generate)
+ios/App/*.xcodeproj
+# Vendored whisper.cpp source + built XCFramework
+# (build with: scripts/build-whisper-ios-xcframework.sh)
+ios/Vendor/
+# Downloaded ggml models (runtime artifacts, never commit)
+ios/App/*.bin
+ios/**/Models/*.bin
+# Xcode user state
+ios/App/*.xcworkspace/xcuserdata/
+ios/App/*.xcodeproj/xcuserdata/
+DerivedData/
+ios/App/DerivedData/
+
 # Environment
 .env
 .env.local

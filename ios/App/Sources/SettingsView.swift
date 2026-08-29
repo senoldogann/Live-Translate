@@ -1,0 +1,149 @@
+import SwiftUI
+
+struct SettingsView: View {
+    @ObservedObject var settings: ObservableSettings
+    @StateObject private var modelManager = ModelManager.shared
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                modelSection
+                languageSection
+                appearanceSection
+                translationSection
+                aboutSection
+            }
+            .navigationTitle("Ayarlar")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Bitti") { dismiss() }
+                }
+            }
+        }
+    }
+
+    // MARK: - Model
+
+    private var modelSection: some View {
+        Section {
+            ForEach(AppSettings.whisperModelOptions) { option in
+                modelRow(option)
+            }
+        } header: {
+            Text("Whisper Modeli")
+        } footer: {
+            Text("Konuşma tanıma cihazınızda çalışır. İlk kullanımda bir model indirilir (~75–142 MB). Daha büyük modeller daha doğru ama daha yavaştır.")
+        }
+    }
+
+    private func modelRow(_ option: AppSettings.WhisperModelOption) -> some View {
+        let state = modelManager.state(for: option)
+        return HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(option.displayName)
+                if case .ready = state {
+                    Text("İndirildi")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                } else if case .downloading = state {
+                    Text("İndiriliyor…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if case .failed(let message) = state {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                }
+            }
+            Spacer()
+            if case .ready = state {
+                if settings.whisperModel == option.id {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Color.accentColor)
+                } else {
+                    Button("Kullan") { settings.whisperModel = option.id }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
+            } else if case .downloading = state {
+                ProgressView()
+            } else {
+                Button("İndir") {
+                    modelManager.download(option)
+                    settings.whisperModel = option.id
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+    }
+
+    // MARK: - Language
+
+    private var languageSection: some View {
+        Section {
+            Picker("Konuşma dili", selection: $settings.sourceLanguage) {
+                ForEach(AppSettings.languageOptions, id: \.id) { lang in
+                    Text(lang.displayName).tag(lang.id)
+                }
+            }
+        } header: {
+            Text("Dil")
+        } footer: {
+            Text("Otomatik algıla seçilirse dil her cümlede tespit edilir. Belirli bir dil seçerseniz başka diller yoksayılır.")
+        }
+    }
+
+    // MARK: - Appearance
+
+    private var appearanceSection: some View {
+        Section("Görünüm") {
+            VStack {
+                HStack {
+                    Text("Yazı boyutu")
+                    Spacer()
+                    Text("\(Int(settings.fontSize))")
+                        .foregroundStyle(.secondary)
+                }
+                Slider(value: $settings.fontSize, in: 18...44, step: 1)
+            }
+            VStack {
+                HStack {
+                    Text("Arka plan koyuluğu")
+                    Spacer()
+                    Text("\(Int(settings.backgroundOpacity * 100))%")
+                        .foregroundStyle(.secondary)
+                }
+                Slider(value: $settings.backgroundOpacity, in: 0.2...0.9)
+            }
+        }
+    }
+
+    // MARK: - Translation
+
+    private var translationSection: some View {
+        Section {
+            Picker("Çeviri sağlayıcısı", selection: $settings.translationProvider) {
+                Text("Geçiş (orijinal metin)").tag("passthrough")
+                Text("Bulut çevirisi (yakında)").tag("cloud").disabled(true)
+            }
+        } header: {
+            Text("Çeviri")
+        } footer: {
+            Text("Şu an çeviri passthrough modunda — orijinal metin gösterilir. Bulut çevirisi (DeepL/Azure) bir sonraki sürümde gelecek.")
+        }
+    }
+
+    // MARK: - About
+
+    private var aboutSection: some View {
+        Section("Hakkında") {
+            LabeledContent("Sürüm", value: "0.1.0")
+            LabeledContent("Gizlilik", value: "Ses cihazdan çıkmaz")
+            LabeledContent("Altyapı", value: "whisper.cpp (on-device)")
+        }
+    }
+}

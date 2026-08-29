@@ -74,6 +74,19 @@ is published.
 **First-time user?** Follow the [Installation Guide](docs/INSTALL.md) — no terminal needed
 (also available in Türkçe).
 
+## iOS (in development)
+
+An iOS companion app is under active development — real-time subtitles on iPhone with
+**on-device** speech recognition (whisper.cpp), no cloud or internet required for Phase 1.
+
+- **Faz 1 (current):** microphone → on-device Whisper → live subtitles (works offline).
+- **Faz 2–4 (planned):** Live Activity (lock screen), device audio + calls via ReplayKit
+  Broadcast Extension with cloud STT, PiP subtitles, App Store release.
+
+See [ios/README.md](ios/README.md) for build instructions (XcodeGen + whisper.cpp
+XCFramework) and the [iOS design doc](docs/superpowers/specs/2026-08-29-ios-subtitle-translation-design.md)
+for the full architecture.
+
 ## Development
 
 ```bash

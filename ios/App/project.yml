@@ -1,0 +1,51 @@
+# XcodeGen spec — generate the Xcode project with:
+#   cd ios/App && xcodegen generate
+#
+# The app embeds the pure Swift core (LiveTranslateCore) as a local package and
+# links the static whisper.xcframework built by scripts/build-whisper-ios-xcframework.sh.
+name: StealthSubtitleTranslator
+
+options:
+  bundleIdPrefix: com.stealth.subtitle
+  deploymentTarget:
+    iOS: "16.1"
+  createIntermediateGroups: true
+
+packages:
+  LiveTranslateCore:
+    path: ../Core
+
+targets:
+  StealthSubtitleTranslator:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    resources:
+      - path: Resources
+    dependencies:
+      - package: LiveTranslateCore
+        product: LiveTranslateCore
+      - framework: ../Vendor/whisper.xcframework
+        embed: false
+      - sdk: CoreML.framework
+      - sdk: Accelerate.framework
+      - sdk: Metal.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.stealth.subtitle.translator.ios
+        PRODUCT_NAME: "Stealth Subtitle Translator"
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_PREVIEWS: YES
+        INFOPLIST_KEY_CFBundleDisplayName: "Stealth Translate"
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "Mikrofon, konuşmaları gerçek zamanlı yazıya döküp çevirmek için kullanılır."
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait"
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks"
+        SWIFT_EMIT_LOC_STRINGS: YES
