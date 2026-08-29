@@ -83,6 +83,10 @@ final class SubtitlePipeline: ObservableObject {
         isListening = true
         phase = .listening
         model.start()
+        await LiveActivityManager.shared.start(
+            sourceLanguage: sourceLanguageOrNil ?? "auto",
+            targetLanguage: settings.targetLanguage
+        )
 
         processingTask?.cancel()
         processingTask = Task { [weak self] in
@@ -104,6 +108,7 @@ final class SubtitlePipeline: ObservableObject {
         phase = .idle
         clearBuffer()
         assembler.reset()
+        Task { await LiveActivityManager.shared.end() }
     }
 
     // MARK: - Model management
@@ -204,6 +209,7 @@ final class SubtitlePipeline: ObservableObject {
             confidence: 0,
             source: "local"
         ))
+        await LiveActivityManager.shared.update(original: published, translated: translated, isFinal: isFinal)
 
         lastTranscriptTime = Date()
         if isFinal {
