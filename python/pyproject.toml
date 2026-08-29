@@ -13,6 +13,11 @@ line-length = 120
 extend-select = ["I", "UP"]
 ignore = ["BLE001", "S110", "SIM102", "RUF013"]
 
+[tool.ruff.lint.isort]
+# Local modules — keeps import sorting consistent whether ruff is run from the
+# repo root (as CI does) or from python/.
+known-first-party = ["engine", "lts_server", "azure_translation_engine", "deepgram_engine"]
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
