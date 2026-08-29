@@ -1,7 +1,7 @@
 # iOS Subtitle Translation — Tasarım Dokümanı
 
 Tarih: 2026-08-29
-Durum: Draft (onay bekliyor)
+Durum: Onaya hazır (araştırma bulguları işlendi)
 
 ## Amaç
 
@@ -11,6 +11,24 @@ iOS platform kısıtları göz önüne alınarak üç ana senaryo hedeflenir:
 1. **Yüz yüze konuşma / ortam sesi** (mikrofon)
 2. **Cihaz sesi** (YouTube, video, stream) — ReplayKit Broadcast Extension
 3. **Video çağrıları** (Zoom/Meet/FaceTime) — Broadcast Extension + PiP
+
+## Pazar & Rakip Araştırması (web, Ağu 2026)
+
+**Kavram kanıtlanmış — ama iOS'ta herkes aynı kısıtla boğuşuyor:**
+
+| Rakip | Platform | Yöntem | Öğrenilen |
+|---|---|---|---|
+| **Whisperr** | Android + iOS + web | MediaProjection (Android) ses yakalama + "display over other apps" overlay + 100+ dil çeviri | Android'de tam konsept çalışıyor; iOS'ta overlay yok → kendi içinde / PiP |
+| **Transync AI** | iOS + macOS + Windows | **PiP** penceresinde yüzen çift dilli altyazı (60+ dil) | iOS'ta PiP = meşru overlay karşılığı — kanıtlanmış model |
+| **Google Live Caption** | Android (sistem) | Aynı dil altyazı, **çeviri yok** | Farkımız çeviri katmanı |
+| **Apple Live Captions** | iOS (sistem) | Sistem altyazı, çeviri yok; 3. parti API **yok** | Apple kapalı; kendi app'imizle rekabet değil, tamamlayıcı |
+| **Apple Live Translation (iOS 26)** | iOS (sistem) | Apple Intelligence; yalnız kendi uygulamaları (Messages/Phone), API yok | 3. parti app'ler erişemiyor |
+| **LiveCaptionN** | Android (OSS) | On-device ASR + sistem sesi | On-device + cihaz sesi Android'de mümkün |
+
+**Çıkarımlar:**
+- Android: `MediaProjection` (ses) + `TYPE_APPLICATION_OVERLAY` (üstte pencere) → konsept birebir çalışır (Whisperr kanıtı).
+- iOS: üçüncü parti overlay **yasağı kesin** (App Store kuralı, 8 yıldır değişmedi). Meşru karşılıklar: **PiP** (Transync kanıtı) + **Live Activity** (kilit ekranı) + **uygulama içi**.
+- On-device Whisper mobilde hazır: `whisper.cpp` (C/C++) → React Native (`whisper.rn`), Flutter (`whisper_cpp_flutter_plus`), Swift (SPM) binding'leri mevcut. Silero VAD de taşınabilir.
 
 ## Kritik Platform Gerçekleri
 
@@ -23,6 +41,8 @@ iOS platform kısıtları göz önüne alınarak üç ana senaryo hedeflenir:
 - **Mikrofon** tamamen açıktır → on-device whisper.cpp burada çalışır (offline, gizlilik).
 - Uygulamanın "kötü amacı olmaması" Apple'ın API kısıtlarını değiştirmez; stealth (ekrandan
   gizleme) iOS'ta yoktur. Gizlilik vaadi yerine görünür, kullanıcı dostu altyazı odaklıyız.
+- iOS 16.1+ **Live Activity** (ActivityKit) + iOS 15+ **PiP custom content source** mevcut;
+  minimum hedef iOS 16.1.
 
 ## Genel Mimari (Yaklaşım A — "Üç Akış, Üç Ekran")
 
@@ -57,6 +77,19 @@ Tek uygulama, ses kaynağına göre çıktı katmanı değişir.
 | Teknik yığın | SwiftUI + native modüller | Broadcast ext/Live Activity/PiP native zorunlu |
 | Yaklaşım | A — "Üç Akış, Üç Ekran" | Her senaryoya iOS'un izin verdiği en iyi çıktı |
 
+## Mevcut Kodun Taşınabilirlik Envanteri (context-manager + dosya analizi)
+
+| macOS parçası | Taşınır mı? | Nasıl |
+|---|---|---|
+| `python/engine.py` — TranscriptionEngine, TranslationEngine, SentenceAssembler mantığı | ✅ Çekirdek mantık | Sunucuda yeniden kullanılır (LTS Server); Swift'e port gerekmez |
+| `python/azure_translation_engine.py`, `deepgram_engine.py` | ✅ | Sunucuda kalır |
+| VAD (webrtcvad) | ✅ | Sunucuda; mobilde Silero VAD |
+| ZMQ IPC (engine ↔ Electron) | ⚠️ | Sunucu tarafında WebSocket'e çevrilir |
+| React UI (karaoke, cümle akışı, glassmorphism) | ⚠️ Kavramsal | SwiftUI'da yeniden yazılır; UX mantığı birebir taşınır |
+| Electron main (BlackHole, setContentProtection, globalShortcut) | ❌ | iOS'ta yok; Broadcast ext + mikrofon ile değişir |
+
+**Sonuç:** Kodun ~%30'u (çekirdek STT/çeviri/VAD) sunucuda yeniden kullanılır; UI tamamen SwiftUI'da yeniden yazılır.
+
 ## Ses Akışı ve Broadcast Extension
 
 ```
@@ -76,16 +109,15 @@ Tek uygulama, ses kaynağına göre çıktı katmanı değişir.
 - **Bir seferde tek kaynak** modeli: mikrofon + cihaz sesi aynı anda alınırsa hoparlör feed'i
   mikrofona karışır.
 - Broadcast Extension → ana uygulama: **App Group + dairesel tampon** (append-only log veya
-  localhost UDP socket). Gecikme hedefi: **2-4 sn uçtan uca**.
+  localhost UDP socket). Gecikme hedefi: **2-4 sn uçtan uca** (macOS ile benzer).
 
 ## Bileşenler (izolasyon ilkesi)
 
-1. **`STTEngine`** — Swift `whisper.cpp` wrapper; mikrofon için cihazda. (ne yapar: PCM→metin;
-   nasıl kullanılır: ses akışı ver; bağımlılık: whisper.cpp kütüphanesi)
+1. **`STTEngine`** — Swift `whisper.cpp` wrapper; mikrofon için cihazda. PCM→metin.
 2. **`CloudSTTClient`** — sunucuya PCM akışı; cihaz sesi/çağrılar. WebSocket.
 3. **`TranslationClient`** — sunucudan çeviri iste.
 4. **`SentenceAssembler`** — taşınan mantık: cümle birleştirme, streaming partial/final.
-5. **`LiveSubtitleModel`** — UI/servis bağımlı olmayan saf altyazı durum modeli (kolay test).
+5. **`LiveSubtitleModel`** — UI/servis bağımsız saf altyazı durum modeli (kolay test).
 
 ## Çıktı Katmanları
 
@@ -93,7 +125,7 @@ Tek uygulama, ses kaynağına göre çıktı katmanı değişir.
 |---|---|---|---|
 | Uygulama içi altyazı | SwiftUI | Mikrofon (ortam dinle) | Ayarlar/geçmiş/teker |
 | Live Activity | ActivityKit (iOS 16.1+) | Mikrofon, arka planda | Kilit ekranı + Dynamic Island |
-| PiP penceresi | AVPictureInPictureController. customContentSource | Cihaz sesi + çağrılar | Overlay'in meşru karşılığı |
+| PiP penceresi | AVPictureInPictureController.customContentSource | Cihaz sesi + çağrılar | Overlay'in meşru karşılığı |
 | Geçmiş / export | SwiftUI liste | Tüm senaryolar | macOS transcript history karşılığı |
 
 ## Veri Akışı
@@ -111,6 +143,17 @@ Tek uygulama, ses kaynağına göre çıktı katmanı değişir.
 - **Hata kategorileri**: izin reddi (yönlendirme), sunucu offline (lokal fallback), STT boş (VAD),
   bulut kota aşımı (uyarı).
 - **Arka plan**: aktif dinleme + Live Activity güncellemesi; iOS kısıtlarına uyar.
+
+## Riskler ve Azaltma
+
+| Risk | Olasılık | Etki | Azaltma |
+|---|---|---|---|
+| App Store inceleme reddi (PiP/extension kuralları) | Orta | Yüksek | Faz 4'te inceleme ön kontrol listesi; user-initiated şartına sıkı uyum |
+| Broadcast Extension 50MB limit aşımı | Orta | Yüksek | Extension'da yalnız hafif yakalama; tüm STT ana app/sunucu |
+| Live Activity arka plan güncelleme limitleri (spor/bilet kategorisi dışı) | Orta | Orta | Uygulama içi + Live Activity karması; kilit ekranı metni statik tut |
+| Sunucu maliyeti (bulut STT) | Yüksek | Orta | Çift mod: mikrofon lokal (ücretsiz); cihaz/çağrı bulut; kota uyarıları |
+| Ses karışması (hoparlör + mikrofon) | Yüksek | Orta | Tek kaynak modeli; kullanıcı seçimi |
+| Apple API değişikliği (iOS 27+) | Düşük | Orta | API soyutlama katmanı (AudioSource protokolü) |
 
 ## Test Stratejisi
 
