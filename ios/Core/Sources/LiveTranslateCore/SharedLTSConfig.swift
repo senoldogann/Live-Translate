@@ -15,6 +15,7 @@ public enum SharedLTSConfig {
     static let keySourceLang = "lts.sourceLang"
     static let keyTargetLang = "lts.targetLang"
     static let keyBroadcastStatus = "lts.broadcastStatus" // "idle" | "broadcasting"
+    static let keyLastError = "lts.lastError"
 
     public static var defaults: UserDefaults? {
         UserDefaults(suiteName: appGroupID)
@@ -45,6 +46,13 @@ public enum SharedLTSConfig {
     public static var isBroadcasting: Bool {
         get { defaults?.string(forKey: keyBroadcastStatus) == "broadcasting" }
         set { defaults?.set(newValue ? "broadcasting" : "idle", forKey: keyBroadcastStatus) }
+    }
+
+    /// Last broadcast error (written by the extension before it fails, read by
+    /// the main app when the broadcast stops).
+    public static var lastError: String? {
+        get { defaults?.string(forKey: keyLastError) }
+        set { defaults?.set(newValue, forKey: keyLastError) }
     }
 
     /// True when a server URL has been configured (the LTS client can connect).

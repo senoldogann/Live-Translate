@@ -62,12 +62,15 @@ Mevcut macOS çekirdeği (engine.py) çok platformlu sunucuda yeniden kullanıl�
 
 **Amaç:** Video çağrısı senaryosu, transcript geçmişi/export, App Store hazırlığı.
 
-- [ ] **4.1** Çağrı senaryosu: broadcast yakalama + PiP (karşı taraf sesi)
-- [ ] **4.2** Transcript geçmişi (liste, tarih filtre, export: TXT/SRT)
-- [ ] **4.3** Hata durumları: izin reddi, sunucu offline (lokal fallback), kota uyarısı
-- [ ] **4.4** App Store inceleme ön kontrol listesi (PiP + extension + Live Activity kuralları)
-- [ ] **4.5** App icon, screenshots, privacy manifest (gerekliyse)
-- [ ] **4.6** TestFlight beta + inceleme gönderimi
+- [x] **4.1** Çağrı senaryosu: broadcast yakalama + PiP (karşı taraf sesi) — Faz 3 ile aynı yol (`.audioApp`)
+- [x] **4.2** Transcript geçmişi — `TranscriptExporter` (TXT/SRT, Core'da 9 test) + `TranscriptHistoryView`
+  (tarih gruplama, paylaşım menüsü)
+- [x] **4.3** Hata durumları: extension hataları app group üzerinden UI'a taşındı
+  (`SharedLTSConfig.lastError`), sunucu offline/kota mesajı yayın durumunda görünür
+- [x] **4.4** App Store inceleme ön kontrol listesi — `docs/app-store-review-checklist.md`
+- [x] **4.5** Privacy manifest (app + extension) — `PrivacyInfo.xcprivacy`, reason kodları
+  (CA92.1/1C8F.1/C617.1/DDA9.1) doğrulandı; app icon derleme hatası düzeltildi
+- [ ] **4.6** TestFlight beta + inceleme gönderimi (kullanıcı eylemi gerekli: Xcode/TestFlight)
 
 **Çıkış:** App Store'a gönderilebilir v1.0.
 

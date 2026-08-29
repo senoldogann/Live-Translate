@@ -119,6 +119,12 @@ final class BroadcastMonitor: ObservableObject {
         isBroadcasting = false
         model.stop()
         pip.stop()
+        // Surface the extension's failure reason (server offline, missing
+        // config, quota) so the user understands why nothing arrived.
+        if let error = SharedLTSConfig.lastError {
+            lastError = error
+        }
+        SharedLTSConfig.lastError = nil
         // The file is cleared by the extension on the next start; drain the
         // last segments first, then reset the transcript for the next session.
         model.clear()

@@ -26,8 +26,8 @@ targets:
         excludes:
           - LiveActivityExtension
           - BroadcastExtension
-    resources:
-      - path: Resources
+      - path: Resources/Assets.xcassets
+      - path: Resources/PrivacyInfo.xcprivacy
     dependencies:
       - package: LiveTranslateCore
         product: LiveTranslateCore

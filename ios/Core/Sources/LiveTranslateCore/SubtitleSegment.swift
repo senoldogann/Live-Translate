@@ -3,7 +3,7 @@ import Foundation
 /// A single transcription/translation result flowing through the pipeline.
 ///
 /// Mirrors `TranscriptResult` in the macOS `python/engine.py` core.
-public struct SubtitleSegment: Equatable, Sendable {
+public struct SubtitleSegment: Equatable, Hashable, Sendable {
     public let original: String
     public let translated: String
     public let timestamp: TimeInterval
