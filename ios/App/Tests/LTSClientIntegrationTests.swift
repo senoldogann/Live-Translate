@@ -30,16 +30,10 @@ final class LTSClientIntegrationTests: XCTestCase {
         }
 
         let client = LTSClient()
-        let readyExpectation = expectation(description: "ready received")
-        let segmentExpectation = expectation(description: "segment received")
+        let segmentReceived = expectation(description: "segment received")
 
-        client.onStateChange = { state in
-            if state == .connected {
-                readyExpectation.fulfill()
-            }
-        }
         client.onSegment = { _ in
-            segmentExpectation.fulfill()
+            segmentReceived.fulfill()
         }
 
         client.connect(
@@ -50,21 +44,34 @@ final class LTSClientIntegrationTests: XCTestCase {
             model: "base"
         )
 
-        // Generous timeouts: on cold CI runners the simulator app launch +
-        // WebSocket handshake alone can take >10s, which has caused flaky
-        // failures on doc-only PRs. 45s leaves headroom without hiding a
-        // genuinely dead server (the isConnected guard below still skips).
-        await fulfillment(of: [readyExpectation], timeout: 45)
-        guard client.isConnected else {
-            // Server not reachable (e.g. local run without the fake server) —
-            // skip instead of failing the whole suite.
+        // Poll for the handshake instead of using `fulfillment`: a
+        // fulfilled-expectation timeout records an assertion failure even
+        // when we then skip, so a locally-absent fake server would fail the
+        // suite instead of skipping. Polling keeps the skip clean. We check
+        // `state == .connected` (set on the server's `ready` message) rather
+        // than `isConnected` (transport running), which turns true as soon as
+        // the task resumes even when no server is listening. Generous budget:
+        // cold CI runners can take >10s for app launch + handshake.
+        let connected = await waitForReady(client, timeout: 45)
+        guard connected else {
             client.disconnect()
             throw XCTSkip("fake LTS server not reachable at ws://127.0.0.1:\(port)")
         }
 
         client.sendPCMBytes(loudPCM())
-        await fulfillment(of: [segmentExpectation], timeout: 15)
+        await fulfillment(of: [segmentReceived], timeout: 15)
 
         client.disconnect()
+    }
+
+    /// Polls `client.state` every 250 ms until the deadline, returning true
+    /// once the server's `ready` message (state == .connected) arrives.
+    private func waitForReady(_ client: LTSClient, timeout: TimeInterval) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if client.state == .connected { return true }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+        return client.state == .connected
     }
 }
