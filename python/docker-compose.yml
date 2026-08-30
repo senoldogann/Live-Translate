@@ -1,0 +1,27 @@
+# One-command LTS server:  docker compose -f python/docker-compose.yml up -d
+#
+# TLS is NOT terminated here — put a reverse proxy (Caddy, nginx, or your
+# cloud's load balancer) in front for production wss://. See docs/lts-deployment.md.
+
+services:
+  lts:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8765:8765"
+    environment:
+      LTS_API_KEY: ${LTS_API_KEY:-}            # set to enable auth
+      LTS_WHISPER_MODEL: ${LTS_WHISPER_MODEL:-base}
+      LTS_DEVICE: ${LTS_DEVICE:-cpu}
+      LTS_COMPUTE_TYPE: ${LTS_COMPUTE_TYPE:-int8}
+      LTS_SOURCE_LANG: ${LTS_SOURCE_LANG:-auto}
+      LTS_TARGET_LANG: ${LTS_TARGET_LANG:-tr}
+      LTS_MAX_CONNECTIONS: ${LTS_MAX_CONNECTIONS:-32}
+    volumes:
+      # Persist the downloaded Whisper model across restarts.
+      - lts-model-cache:/root/.cache
+    restart: unless-stopped
+
+volumes:
+  lts-model-cache:

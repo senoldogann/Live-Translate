@@ -35,6 +35,7 @@ from typing import Any
 
 import numpy as np
 import websockets
+from websockets.http11 import Headers, Response
 
 from engine import (
     TranscriptionEngine,
@@ -69,6 +70,8 @@ class LTSConfig:
     default_target_lang: str = os.environ.get("LTS_TARGET_LANG", "tr")
     # Preload the offline Argos fallback (slow first run, network access).
     load_offline_translator: bool = os.environ.get("LTS_LOAD_OFFLINE_TRANSLATOR", "0") == "1"
+    # Hard cap on concurrent clients (protects the shared Whisper model).
+    max_connections: int = int(os.environ.get("LTS_MAX_CONNECTIONS", "32"))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -313,6 +316,21 @@ class LTSServer:
         self._vad_factory = vad_factory
         self._transcriber: Any = None
         self._translator: Any = None
+        # Client slot limiter; ``handle`` rejects connections beyond the cap.
+        self._slots = asyncio.Semaphore(max(1, config.max_connections))
+
+    # -- HTTP endpoints ------------------------------------------------------
+
+    async def _process_request(self, connection, request) -> Response | None:
+        """Health check for load balancers / Docker HEALTHCHECK.
+
+        ``websockets`` calls this for every HTTP request; returning a response
+        short-circuits the WebSocket upgrade, so ``GET /health`` gets a plain
+        HTTP 200 without opening a socket.
+        """
+        if getattr(request, "path", "") == "/health":
+            return Response(200, "OK", Headers({"Content-Type": "text/plain"}), b"ok")
+        return None
 
     async def _ensure_models(self) -> None:
         if self._transcriber is None:
@@ -326,6 +344,19 @@ class LTSServer:
                 await asyncio.to_thread(self._translator.load)
 
     async def handle(self, websocket: websockets.ServerConnection) -> None:
+        # Reject clients beyond the connection cap with a 1013 (try again later)
+        # instead of queueing them behind the shared Whisper model. The locked()
+        # pre-check avoids a race where acquire() would block.
+        if self._slots.locked():
+            await websocket.close(code=1013, reason="server busy")
+            return
+        await self._slots.acquire()
+        try:
+            await self._handle(websocket)
+        finally:
+            self._slots.release()
+
+    async def _handle(self, websocket: websockets.ServerConnection) -> None:
         try:
             # The first message must be a JSON config (auth + languages).
             config_msg = await asyncio.wait_for(websocket.recv(), timeout=30)
@@ -392,10 +423,21 @@ class LTSServer:
             except websockets.ConnectionClosed:
                 pass
 
+    def _serve(self):
+        """Return the socket server async context manager (extracted for testability)."""
+        return websockets.serve(
+            self.handle,
+            self.config.host,
+            self.config.port,
+            max_size=2**20,
+            process_request=self._process_request,
+        )
+
     async def serve_forever(self) -> None:
-        async with websockets.serve(self.handle, self.config.host, self.config.port, max_size=2**20):
+        async with self._serve():
             print(f"[LTS] listening on ws://{self.config.host}:{self.config.port}")
             print(f"[LTS] model={self.config.whisper_model} auth={'on' if self.config.api_key else 'off'}")
+            print(f"[LTS] max_connections={self.config.max_connections}")
             await asyncio.Future()  # run forever
 
 
