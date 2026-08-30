@@ -128,3 +128,6 @@ schemes:
       config: Debug
       targets:
         - StealthSubtitleTranslatorTests
+      environmentVariables:
+        # Integration tests connect to the fake LTS server (scripts/lts_fake_server.py).
+        LTS_TEST_PORT: "8765"

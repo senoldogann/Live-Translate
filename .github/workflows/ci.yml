@@ -139,8 +139,19 @@ jobs:
       - name: Stub whisper xcframework (if real one absent)
         run: bash scripts/make-whisper-stub-xcframework.sh
 
-      - name: App pipeline tests (simulator)
+      - name: App pipeline tests (simulator) against fake LTS
         run: |
+          pip install -q websockets numpy
+          # Real LTSServer + fake transcriber/translator/VAD for the Swift
+          # LTSClient integration test (same wire protocol as production).
+          python3 scripts/lts_fake_server.py --port 8765 > /tmp/lts-fake.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8765/health >/dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8765/health || { echo "fake LTS failed to start:"; cat /tmp/lts-fake.log; exit 1; }
           DEST=$(xcrun simctl list devices available -j | python3 -c \
             "import json,sys; d=json.load(sys.stdin); devs=[info['name'] for rt in d['devices'].values() for info in rt if info.get('isAvailable')]; print('platform=iOS Simulator,name=' + sorted(devs)[-1] if devs else '')")
           xcodebuild test -project ios/App/StealthSubtitleTranslator.xcodeproj \
