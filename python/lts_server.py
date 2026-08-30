@@ -27,6 +27,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import secrets
 import time
 from collections.abc import Callable
@@ -72,6 +73,10 @@ class LTSConfig:
     load_offline_translator: bool = os.environ.get("LTS_LOAD_OFFLINE_TRANSLATOR", "0") == "1"
     # Hard cap on concurrent clients (protects the shared Whisper model).
     max_connections: int = int(os.environ.get("LTS_MAX_CONNECTIONS", "32"))
+    # STT engine: "local" (faster-whisper, offline/privacy-first) or "deepgram"
+    # (Nova-3 streaming cloud STT). Per-client config may override with an
+    # "engine" field; "deepgram" needs DEEPGRAM_API_KEY (or per-client sttApiKey).
+    engine: str = os.environ.get("LTS_ENGINE", "local").strip().lower()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -212,6 +217,13 @@ class LTSSession:
                 self._clear_audio()
             return []
 
+        # Drop Whisper hallucinations (CJK punctuation floods, repeated-phrase
+        # loops) before they hit the phone as confusing "translations".
+        if self._is_hallucination(text, float(confidence or 0)):
+            if is_final:
+                self._clear_audio()
+            return []
+
         # Language match: skip when a specific source language is selected but
         # the detected language differs (mirrors engine.py §5.5).
         if detected_lang and self.source_lang not in ("auto", ""):
@@ -266,6 +278,44 @@ class LTSSession:
             )
         ]
 
+    # -- hallucination guard -------------------------------------------------
+
+    _LETTER_RE = re.compile(r"[A-Za-zÇĞİÖŞÜçğıöşü0-9]", re.UNICODE)
+
+    def _is_hallucination(self, text: str, confidence: float) -> bool:
+        """True when Whisper produced its classic noise/garbage hallucination.
+
+        Faster-whisper's small/base models frequently "transcribe" silence or
+        music-heavy broadcast audio as nonsense: CJK punctuation floods (\u300a), or
+        a short phrase repeated dozens of times ("I'm not a real man, ..."). These
+        have low real-word density, near-garbage punctuation, or pathological
+        repetition. We drop them before they reach the phone instead of showing
+        confusing subtitles.
+        """
+        words = text.split()
+        if not words:
+            return False
+
+        # 1. The model is very unsure of everything.
+        if confidence < -1.2:
+            return True
+
+        # 2. Most "words" contain no letters or digits -> punctuation/noise flood.
+        if len(words) >= 3:
+            real = [w for w in words if self._LETTER_RE.search(w)]
+            if len(real) / len(words) < 0.4:
+                return True
+
+        # 3. Pathological repetition: most words are repeats of a tiny set
+        #    ("I'm not a real man" x30 has <5% distinct tokens). Genuine
+        #    sentences keep a much higher distinct-word ratio.
+        if len(words) >= 8:
+            distinct = len({w.lower() for w in words})
+            if distinct * 4 < len(words):
+                return True
+
+        return False
+
     # -- internals ---------------------------------------------------------
 
     def _current_audio(self, tail: int | None = None) -> np.ndarray:
@@ -289,6 +339,50 @@ class LTSSession:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Cloud (Deepgram) mode
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class WebSocketPublisher:
+    """Thread-safe bridge from DeepgramWSClient's worker thread into the asyncio loop.
+
+    ``DeepgramWSClient`` runs its translation in a daemon thread and calls
+    ``publisher.publish()`` synchronously from there. ``asyncio.Queue`` is not
+    thread-safe, so we hop onto the owning event loop with
+    ``call_soon_threadsafe`` — the only correct way to enqueue from another thread.
+    """
+
+    def __init__(self, loop: asyncio.AbstractEventLoop, queue: asyncio.Queue):
+        self._loop = loop
+        self._queue = queue
+
+    def publish(self, payload: dict) -> None:
+        self._loop.call_soon_threadsafe(self._queue.put_nowait, payload)
+
+
+def cloud_payload_to_segment(payload: dict, language: str) -> dict[str, Any]:
+    """Normalize a cloud engine's publish payload to the LTS segment shape."""
+    return {
+        "type": "segment",
+        "original": str(payload.get("original") or ""),
+        "translated": str(payload.get("translated") or "").strip(),
+        "isFinal": bool(payload.get("isFinal", True)),
+        "confidence": round(float(payload.get("confidence") or 0.0), 4),
+        "language": language,
+        "provider": str(payload.get("translationProvider") or payload.get("source") or "cloud"),
+        "ts": float(payload.get("timestamp") or time.time()),
+    }
+
+
+def resolve_deepgram_language(source_lang: str) -> str:
+    """Deepgram needs a concrete language code; "auto" is not valid on the wire."""
+    lang = (source_lang or "").strip().lower()
+    if lang in ("", "auto"):
+        return "en"
+    return lang
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # WebSocket server
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -300,6 +394,7 @@ class LTSServer:
         transcriber_factory: Callable[[], Any] | None = None,
         translator_factory: Callable[[str, str], Any] | None = None,
         vad_factory: Callable[[], Any] | None = None,
+        deepgram_client_factory: Callable[[Any, Any], Any] | None = None,
     ):
         self.config = config
         self._transcriber_factory = transcriber_factory or (
@@ -314,10 +409,19 @@ class LTSServer:
             lambda src, tgt: TranslationEngine(source_lang=src, target_lang=tgt)
         )
         self._vad_factory = vad_factory
+        self._deepgram_client_factory = deepgram_client_factory or self._default_deepgram_client
         self._transcriber: Any = None
         self._translator: Any = None
         # Client slot limiter; ``handle`` rejects connections beyond the cap.
         self._slots = asyncio.Semaphore(max(1, config.max_connections))
+
+    @staticmethod
+    def _default_deepgram_client(publisher: Any, translator: Any) -> Any:
+        """Construct the real Deepgram client. Import is lazy so local-only
+        deployments (Docker's lean image) never pull the SDK."""
+        from deepgram_engine import DeepgramWSClient
+
+        return DeepgramWSClient(publisher=publisher, translator=translator)
 
     # -- HTTP endpoints ------------------------------------------------------
 
@@ -371,6 +475,15 @@ class LTSServer:
             source_lang = cfg.get("sourceLang") or self.config.default_source_lang
             target_lang = cfg.get("targetLang") or self.config.default_target_lang
 
+            # Engine selection: per-client config wins, server env is the default.
+            engine = str(cfg.get("engine") or self.config.engine).strip().lower()
+            if engine == "deepgram":
+                await self._handle_deepgram(websocket, cfg, source_lang, target_lang)
+                return
+            if engine != "local":
+                await websocket.send(json.dumps({"type": "error", "message": f"unknown engine: {engine}"}))
+                return
+
             await self._ensure_models()
             session = LTSSession(
                 transcriber=self._transcriber,
@@ -423,6 +536,86 @@ class LTSServer:
             except websockets.ConnectionClosed:
                 pass
 
+    async def _handle_deepgram(
+        self,
+        websocket: websockets.ServerConnection,
+        cfg: dict[str, Any],
+        source_lang: str,
+        target_lang: str,
+    ) -> None:
+        """Cloud mode: Deepgram Nova-3 streaming STT + translation.
+
+        Raw int16 LE PCM frames are forwarded straight to Deepgram (its own VAD
+        and endpointing replace the local energy detector). The Deepgram client
+        translates off its callback thread and publishes through
+        ``WebSocketPublisher``; ``process_loop`` drains that queue and forwards
+        normalized segments to the client. No Whisper model is loaded here.
+        """
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[dict] = asyncio.Queue()
+        lang = resolve_deepgram_language(source_lang)
+        translator = self._translator_factory(lang, target_lang)
+
+        try:
+            client = self._deepgram_client_factory(WebSocketPublisher(loop, queue), translator)
+        except ImportError:
+            await websocket.send(
+                json.dumps(
+                    {"type": "error", "message": "deepgram-sdk not installed on the server (pip install deepgram-sdk)"}
+                )
+            )
+            return
+
+        key = str(cfg.get("sttApiKey") or "").strip()
+        if key:
+            client.api_key = key
+        if not client.has_credentials():
+            await websocket.send(
+                json.dumps(
+                    {
+                        "type": "error",
+                        "message": "Deepgram API key missing — set DEEPGRAM_API_KEY on the server or send sttApiKey in the config",
+                    }
+                )
+            )
+            return
+
+        # LTS is a live-subtitle client: emit committed previews, not only
+        # utterance-end finals.
+        client.streaming_mode = True
+        await websocket.send(json.dumps({"type": "ready", "model": "deepgram-nova-3", "engine": "deepgram"}))
+        client.start(lang)
+
+        stop = asyncio.Event()
+
+        async def receive_loop() -> None:
+            try:
+                async for message in websocket:
+                    if isinstance(message, (bytes, bytearray)):
+                        client.send_audio(bytes(message))
+            except websockets.ConnectionClosed:
+                pass
+            finally:
+                stop.set()
+
+        async def process_loop() -> None:
+            while not stop.is_set():
+                await asyncio.sleep(0.05)
+                try:
+                    while True:
+                        try:
+                            payload = queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
+                        await websocket.send(json.dumps(cloud_payload_to_segment(payload, lang)))
+                except websockets.ConnectionClosed:
+                    stop.set()
+
+        try:
+            await asyncio.gather(receive_loop(), process_loop())
+        finally:
+            client.stop()
+
     def _serve(self):
         """Return the socket server async context manager (extracted for testability)."""
         return websockets.serve(
@@ -430,6 +623,14 @@ class LTSServer:
             self.config.host,
             self.config.port,
             max_size=2**20,
+            # Disable server-side pings: the websockets library pings every
+            # ping_interval (default 20s) and drops the connection when the
+            # peer's pong is delayed. iOS URLSessionWebSocketTask replies to
+            # pings, but under ReplayKit capture the extension can lag past the
+            # 20s ping_timeout, killing the session mid-broadcast ("socket is
+            # not connected" on the client). Sessions are short-lived on LAN,
+            # so keepalive pings buy nothing here.
+            ping_interval=None,
             process_request=self._process_request,
         )
 
