@@ -82,8 +82,12 @@ Mevcut macOS çekirdeği (engine.py) çok platformlu sunucuda yeniden kullanıl�
 - [x] **4.5.3** Dil algılama bir kez (otomatik modda ilk sonuçta pinlenir, `detectLanguage`
   sonraki geçişlerde kapalı) — cihazda ~2x inference maliyetini düşürür
 - [x] **4.5.4** `STTEngine.transcribe` sadeleştirildi (`runFull` helper, `detectLanguage` param)
+- [x] **4.5.5** App target testleri — `PipelineDependencies` (STT/audio/model/LiveActivity
+  protokolleri) ile pipeline cihazsız test edilebilir; `SubtitlePipelineTests`
+  (8 test: izin/model/akış/l dil pinleme/mismatch/boş metin) + CI iOS job
+  (Core headless + App simülatör)
 
-**Çıkış:** Streaming pipeline'ı CPU/pil verimli ve deterministik (Core'da 70 test).
+**Çıkış:** Streaming pipeline'ı CPU/pil verimli ve deterministik (Core 70 + App 8 test, CI'da).
 
 ## Bağımlılıklar
 

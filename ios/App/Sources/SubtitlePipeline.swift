@@ -20,7 +20,7 @@ final class SubtitlePipeline: ObservableObject {
 
     let model = LiveSubtitleModel()
 
-    private let stt = STTEngine()
+    private let stt: STTTranscribing
     // Adaptive VAD: threshold follows the ambient noise floor instead of the
     // fixed 0.01 RMS cutoff, so quiet mics / quiet rooms no longer reject speech.
     private let vad = AdaptiveVoiceActivityDetector()
@@ -31,8 +31,9 @@ final class SubtitlePipeline: ObservableObject {
     private let scheduler = TranscriptionScheduler()
     private var translator: TranslationProviding = PassthroughTranslationProvider()
 
-    private var audio: AudioSessionManager?
-    private var settings: ObservableSettings
+    private var audio: AudioSessioning?
+    private let settings: ObservableSettings
+    private let dependencies: PipelineDependencies
 
     // Thread-safe audio buffer (audio thread appends, processing loop reads).
     private let bufferLock = NSLock()
@@ -47,8 +48,10 @@ final class SubtitlePipeline: ObservableObject {
     /// Language pinned by the first auto-detection result; `nil` until known.
     private var detectedLanguage: String?
 
-    init(settings: ObservableSettings) {
+    init(settings: ObservableSettings, dependencies: PipelineDependencies = .live) {
         self.settings = settings
+        self.dependencies = dependencies
+        self.stt = dependencies.makeSTT()
     }
 
     // MARK: - Lifecycle
@@ -57,7 +60,7 @@ final class SubtitlePipeline: ObservableObject {
         guard !isListening else { return }
         DebugLog.shared.clear()
         DebugLog.shared.log("başlat: izin isteniyor")
-        guard await AudioSessionManager.requestPermission() else {
+        guard await dependencies.requestPermission() else {
             DebugLog.shared.log("başlat: MİKROFON İZNİ REDDEDİLDİ")
             phase = .failed("Mikrofon izni gerekli. Ayarlar → Gizlilik → Mikrofon.")
             return
@@ -82,7 +85,7 @@ final class SubtitlePipeline: ObservableObject {
         DebugLog.shared.log("kaynak dil: \(settings.sourceLanguage == "auto" ? "otomatik" : settings.sourceLanguage)")
 
         do {
-            let audio = try AudioSessionManager()
+            let audio = try dependencies.makeAudio()
             audio.onAudioChunk = { [weak self] chunk in
                 self?.handleAudioChunk(chunk)
             }
@@ -101,7 +104,7 @@ final class SubtitlePipeline: ObservableObject {
         lastProcessedSampleCount = 0
         DebugLog.shared.log("dinleme başladı — altyazı bekleniyor")
         model.start()
-        await LiveActivityManager.shared.start(
+        await dependencies.liveActivity.start(
             sourceLanguage: sourceLanguageOrNil ?? "auto",
             targetLanguage: settings.targetLanguage
         )
@@ -129,18 +132,18 @@ final class SubtitlePipeline: ObservableObject {
         resetVAD()
         detectedLanguage = nil
         assembler.reset()
-        Task { await LiveActivityManager.shared.end() }
+        Task { await dependencies.liveActivity.end() }
     }
 
     // MARK: - Model management
 
     private func ensureModel() async -> URL? {
         let option = AppSettings.modelOption(forID: settings.whisperModel) ?? AppSettings.whisperModelOptions[0]
-        if let url = ModelManager.shared.localURL(for: option) {
+        if let url = dependencies.modelLocator.localURL(for: option) {
             return url
         }
         // Model missing — kick off a download and surface instructions to the user.
-        ModelManager.shared.download(option)
+        dependencies.modelLocator.download(option)
         phase = .failed("Whisper modeli indirilmedi. Ayarlar → Model'e gidin ve \"\(option.displayName)\" modelini indirin.")
         return nil
     }
@@ -268,7 +271,7 @@ final class SubtitlePipeline: ObservableObject {
             confidence: 0,
             source: "local"
         ))
-        await LiveActivityManager.shared.update(original: published, translated: translated, isFinal: isFinal)
+        await dependencies.liveActivity.update(original: published, translated: translated, isFinal: isFinal)
 
         lastTranscriptTime = Date()
         if isFinal {

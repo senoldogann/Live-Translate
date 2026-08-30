@@ -95,3 +95,36 @@ targets:
         CODE_SIGN_STYLE: Automatic
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         SKIP_INSTALL: YES
+
+  StealthSubtitleTranslatorTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "16.2"
+    sources:
+      - path: Tests
+    dependencies:
+      - target: StealthSubtitleTranslator
+      - package: LiveTranslateCore
+        product: LiveTranslateCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.stealth.subtitle.translator.ios.tests
+        SWIFT_VERSION: "5.0"
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: YES
+        # PRODUCT_NAME contains spaces, so XcodeGen's automatic TEST_HOST
+        # derivation (target-name based) is wrong — set it explicitly.
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Stealth Subtitle Translator.app/Stealth Subtitle Translator"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+
+schemes:
+  StealthSubtitleTranslator:
+    build:
+      targets:
+        StealthSubtitleTranslator: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - StealthSubtitleTranslatorTests
