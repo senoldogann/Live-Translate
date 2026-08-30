@@ -250,6 +250,76 @@ class LTSSessionTests(unittest.TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Health endpoint + connection limits
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class LTSHealthAndLimitsTests(unittest.TestCase):
+    def make_server(self, **config_kwargs):
+        config = LTSConfig(load_offline_translator=False, **config_kwargs)
+        return LTSServer(
+            config,
+            transcriber_factory=FakeTranscriber,
+            translator_factory=lambda src, tgt: FakeTranslator(),
+            vad_factory=EnergyVAD,
+        )
+
+    def test_health_path_returns_ok(self):
+        from types import SimpleNamespace
+
+        server = self.make_server()
+        resp = asyncio.run(server._process_request(None, SimpleNamespace(path="/health")))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.body, b"ok")
+
+    def test_other_paths_pass_through(self):
+        from types import SimpleNamespace
+
+        server = self.make_server()
+        resp = asyncio.run(server._process_request(None, SimpleNamespace(path="/")))
+        self.assertIsNone(resp)
+
+    def test_health_endpoint_over_http(self):
+        """A real server answers GET /health with 200 "ok" (Docker HEALTHCHECK)."""
+        import urllib.request
+
+        def fetch(port: int) -> tuple[int, bytes]:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=5) as resp:
+                return resp.status, resp.read()
+
+        async def main():
+            server = self.make_server()
+            async with server._serve() as ws_server:
+                port = ws_server.sockets[0].getsockname()[1]
+                # Blocking HTTP call must run off the event loop.
+                status, body = await asyncio.to_thread(fetch, port)
+                self.assertEqual(status, 200)
+                self.assertEqual(body, b"ok")
+
+        asyncio.run(main())
+
+    def test_max_connections_rejects_overflow(self):
+        """Beyond the cap, new clients are closed with 1013 (try again later)."""
+
+        async def main():
+            server = self.make_server(max_connections=1)
+            async with server._serve() as ws_server:
+                port = ws_server.sockets[0].getsockname()[1]
+                first = await websockets.connect(f"ws://127.0.0.1:{port}")
+                # Let the first handler acquire the slot.
+                await asyncio.sleep(0.05)
+                second = await websockets.connect(f"ws://127.0.0.1:{port}")
+                try:
+                    await second.recv()
+                    self.fail("expected the second connection to be closed")
+                except websockets.ConnectionClosed as exc:
+                    self.assertEqual(exc.code, 1013)
+                await first.close()
+
+        asyncio.run(main())
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # End-to-end WebSocket tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
