@@ -141,10 +141,12 @@ jobs:
 
       - name: App pipeline tests (simulator) against fake LTS
         run: |
-          pip install -q websockets numpy
+          # venv avoids PEP 668 externally-managed pip on the macOS runner.
+          python3 -m venv /tmp/lts-venv
+          /tmp/lts-venv/bin/pip install -q websockets numpy
           # Real LTSServer + fake transcriber/translator/VAD for the Swift
           # LTSClient integration test (same wire protocol as production).
-          python3 scripts/lts_fake_server.py --port 8765 > /tmp/lts-fake.log 2>&1 &
+          /tmp/lts-venv/bin/python scripts/lts_fake_server.py --port 8765 > /tmp/lts-fake.log 2>&1 &
           SERVER_PID=$!
           trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
           for i in $(seq 1 30); do
