@@ -36,9 +36,11 @@ struct ContentView: View {
                 }
 
                 Spacer()
-                if viewModel.settings.translationProvider == "lts" {
-                    broadcastStatusBar
-                }
+                // Broadcast errors/status matter regardless of the selected
+                // translation provider — a failing extension is invisible
+                // otherwise (the user sees a silent broadcast with no way to
+                // learn why).
+                broadcastStatusBar
                 statusBar
                 controls
             }

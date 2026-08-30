@@ -78,9 +78,16 @@ struct DiagnosticsView: View {
             activityItems: [DebugLog.shared.renderedText()],
             applicationActivities: nil
         )
-        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let root = scene.windows.first?.rootViewController {
-            root.present(controller, animated: true)
+        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let root = scene.windows.first?.rootViewController
+        else { return }
+        // This view is itself presented as a sheet, so presenting on `root`
+        // fails silently (a sheet cannot present from a view already inside a
+        // sheet). Walk to the topmost presented controller instead.
+        var presenter = root
+        while let top = presenter.presentedViewController {
+            presenter = top
         }
+        presenter.present(controller, animated: true)
     }
 }
