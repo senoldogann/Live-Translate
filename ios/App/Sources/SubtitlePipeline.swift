@@ -25,6 +25,10 @@ final class SubtitlePipeline: ObservableObject {
     // fixed 0.01 RMS cutoff, so quiet mics / quiet rooms no longer reject speech.
     private let vad = AdaptiveVoiceActivityDetector()
     private let assembler = SentenceAssembler()
+    // Timing rules (mirror engine.py): silence/6s finals, 5s partial window,
+    // 0.2s cadence — plus a 0.5s min-new-audio rule so unchanged tail windows
+    // are not re-transcribed (CPU/battery saving).
+    private let scheduler = TranscriptionScheduler()
     private var translator: TranslationProviding = PassthroughTranslationProvider()
 
     private var audio: AudioSessionManager?
@@ -38,13 +42,10 @@ final class SubtitlePipeline: ObservableObject {
     private var processingTask: Task<Void, Never>?
     private var isListening = false
     private var lastTranscriptTime = Date.distantPast
-
-    // Engine constants (mirror engine.py).
-    let silenceThreshold: TimeInterval = 0.35
-    let maxSegmentDuration: TimeInterval = 6.0
-    let processingInterval: TimeInterval = 0.2
-    let partialWindow: TimeInterval = 5.0
-    let minAudioDuration: TimeInterval = 0.2
+    /// Buffer length at the last transcription pass (drives the min-new-audio rule).
+    private var lastProcessedSampleCount = 0
+    /// Language pinned by the first auto-detection result; `nil` until known.
+    private var detectedLanguage: String?
 
     init(settings: ObservableSettings) {
         self.settings = settings
@@ -96,6 +97,8 @@ final class SubtitlePipeline: ObservableObject {
 
         isListening = true
         phase = .listening
+        detectedLanguage = nil
+        lastProcessedSampleCount = 0
         DebugLog.shared.log("dinleme başladı — altyazı bekleniyor")
         model.start()
         await LiveActivityManager.shared.start(
@@ -105,7 +108,7 @@ final class SubtitlePipeline: ObservableObject {
 
         processingTask?.cancel()
         processingTask = Task { [weak self] in
-            let interval = UInt64((self?.processingInterval ?? 0.2) * 1_000_000_000)
+            let interval = UInt64((self?.scheduler.processingInterval ?? 0.2) * 1_000_000_000)
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: interval)
                 await self?.processOnce()
@@ -124,6 +127,7 @@ final class SubtitlePipeline: ObservableObject {
         phase = .idle
         clearBuffer()
         resetVAD()
+        detectedLanguage = nil
         assembler.reset()
         Task { await LiveActivityManager.shared.end() }
     }
@@ -172,6 +176,7 @@ final class SubtitlePipeline: ObservableObject {
         speechBuffer.removeAll()
         lastSpeechTime = nil
         bufferLock.unlock()
+        lastProcessedSampleCount = 0
     }
 
     // MARK: - VAD reset
@@ -192,44 +197,51 @@ final class SubtitlePipeline: ObservableObject {
         let lastSpeech = lastSpeechTime
         bufferLock.unlock()
 
-        let duration = Double(buffer.count) / 16000.0
-        guard duration >= minAudioDuration else { return }
+        let decision = scheduler.decide(
+            now: Date(),
+            bufferLength: buffer.count,
+            lastProcessedLength: lastProcessedSampleCount,
+            lastSpeech: lastSpeech,
+            lastTranscript: lastTranscriptTime
+        )
+        guard decision.kind != .skip else { return }
 
-        // Diagnostics: if this fires repeatedly with no whisper output, the VAD
-        // is rejecting the mic level (see the VAD: ses/kesme lines above).
-
-        // Rate limit partial passes.
-        let now = Date()
-        guard now.timeIntervalSince(lastTranscriptTime) >= processingInterval else { return }
-
-        let isSilenceFinal = lastSpeech.map { now.timeIntervalSince($0) >= silenceThreshold } ?? false
-        let isTimeoutFinal = duration > maxSegmentDuration
-        let isFinal = isSilenceFinal || isTimeoutFinal
-
-        // CPU saving: partial passes only process the last N seconds.
-        let samples: [Float]
-        if !isFinal {
-            let maxPartial = Int(16000.0 * partialWindow)
-            samples = buffer.count > maxPartial ? Array(buffer.suffix(maxPartial)) : buffer
-        } else {
-            samples = buffer
-        }
+        let isFinal = decision.kind == .final
+        let isTimeoutFinal = decision.isTimeoutCut
+        // Tail window for partials; the full buffer for finals (suffix(count)
+        // with count == buffer.count returns the whole buffer).
+        let samples = Array(buffer.suffix(decision.sampleCount))
+        lastProcessedSampleCount = buffer.count
 
         // Transcribe off the main thread (whisper is blocking). Capture values
         // first to avoid touching MainActor-isolated state from the detached task.
         let sourceLanguage = sourceLanguageOrNil
+        // Auto-detect once, then pin: detection is a full extra inference pass.
+        let pinnedLanguage = detectedLanguage ?? sourceLanguage
+        let shouldDetect = sourceLanguage == nil && detectedLanguage == nil
         let contextPrompt = assembler.lastContext
         let result = await Task.detached(priority: .userInitiated) { [stt] in
-            stt.transcribe(samples: samples, language: sourceLanguage, prompt: contextPrompt)
+            stt.transcribe(
+                samples: samples,
+                language: pinnedLanguage,
+                prompt: contextPrompt,
+                detectLanguage: shouldDetect
+            )
         }.value
 
         guard case .success(let transcription) = result else { return }
 
         let text = transcription.text
         guard !text.isEmpty else {
-            DebugLog.shared.log("whisper: boş metin (durum=ok, final=\(isFinal), süre=\(String(format: "%.2f", duration))s)")
+            DebugLog.shared.log("whisper: boş metin (durum=ok, final=\(isFinal), süre=\(String(format: "%.2f", Double(buffer.count) / 16000.0))s)")
             if isFinal { clearBuffer() }
             return
+        }
+
+        // Pin the auto-detected language on the first non-empty result.
+        if sourceLanguage == nil, detectedLanguage == nil, let language = transcription.language {
+            detectedLanguage = language
+            DebugLog.shared.log("dil otomatik algılandı: \(language)")
         }
 
         // Language match check (mirrors engine.py §5.5).
@@ -261,7 +273,7 @@ final class SubtitlePipeline: ObservableObject {
         lastTranscriptTime = Date()
         if isFinal {
             clearBuffer()
-            DebugLog.shared.log(String(format: "cümle tamamlandı ✓ (toplam %.1fs)", duration))
+            DebugLog.shared.log(String(format: "cümle tamamlandı ✓ (toplam %.1fs)", Double(buffer.count) / 16000.0))
         }
     }
 
