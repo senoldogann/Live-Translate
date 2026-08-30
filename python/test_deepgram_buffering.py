@@ -101,31 +101,26 @@ class DeepgramBufferingTests(unittest.TestCase):
             time.sleep(0.01)
         self.fail(f"Timed out waiting for {expected_count} messages, got {len(publisher.messages)}")
 
-    def test_streaming_mode_ignores_interims_and_previews_finalized_segments(self):
+    def test_streaming_mode_previews_interims_and_commits_finalized_segments(self):
         client, publisher, translator = self.start_client(streaming_mode=True)
         try:
+            # Interims are rolling previews (previously dropped, leaving the
+            # client silent whenever Deepgram did not finalize).
             client._on_message(FakeResultsMessage("Hello", is_final=False))
-            time.sleep(0.05)
-            self.assertEqual(publisher.messages, [])
-
-            client._on_message(FakeResultsMessage("Hello everyone", is_final=True, speech_final=False))
             self.wait_for_messages(publisher, 1)
-
             self.assertFalse(publisher.messages[0]["isFinal"])
-            self.assertEqual(publisher.messages[0]["original"], "Hello everyone")
-            self.assertEqual(publisher.messages[0]["translated"], "PREVIEW:Hello everyone")
+            self.assertEqual(publisher.messages[0]["original"], "Hello")
+            self.assertEqual(publisher.messages[0]["translated"], "PREVIEW:Hello")
             self.assertFalse(translator.calls[0]["prefer_quality"])
 
-            client._on_message(FakeResultsMessage("Welcome back", is_final=True, speech_final=True))
+            # A speech-final result commits everything heard so far as FINAL.
+            client._on_message(FakeResultsMessage("Hello everyone Welcome back", is_final=True, speech_final=True))
             self.wait_for_messages(publisher, 2)
-
-            self.assertTrue(publisher.messages[1]["isFinal"])
-            self.assertEqual(publisher.messages[1]["original"], "Hello everyone Welcome back")
-            self.assertEqual(
-                publisher.messages[1]["translated"],
-                "FINAL:Hello everyone Welcome back",
-            )
-            self.assertTrue(translator.calls[1]["prefer_quality"])
+            final = publisher.messages[-1]
+            self.assertTrue(final["isFinal"])
+            self.assertEqual(final["original"], "Hello everyone Welcome back")
+            self.assertEqual(final["translated"], "FINAL:Hello everyone Welcome back")
+            self.assertTrue(translator.calls[-1]["prefer_quality"])
         finally:
             self.stop_client(client)
 

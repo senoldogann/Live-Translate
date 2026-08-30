@@ -53,6 +53,9 @@ class DeepgramWSClient:
         # Protected by _conn_lock; written from daemon thread, read from audio thread
         self._connection = None
         self._conn_lock = threading.Lock()
+        # Audio that arrives before the socket is ready is buffered here and
+        # flushed from ``_on_open`` (see ``send_audio``).
+        self._pending_audio: list[bytes] = []
         self._listen_thread: threading.Thread | None = None
         self._keepalive_thread: threading.Thread | None = None
         self._translation_thread: threading.Thread | None = None
@@ -65,6 +68,8 @@ class DeepgramWSClient:
         self._recent_context: deque[str] = deque(maxlen=3)
         self._last_preview_source: str = ""
         self._last_final_source: str = ""
+        # Last interim transcript emitted as a rolling preview (dedup only).
+        self._last_interim: str = ""
 
         # Async translation queue (prevents websocket callback stalls)
         self._translation_queue: Queue[TranslationJob | None] = Queue()
@@ -162,9 +167,18 @@ class DeepgramWSClient:
         return bool(self.api_key.strip())
 
     def send_audio(self, audio_bytes: bytes) -> None:
-        """Send raw PCM-16 LE bytes to the open WebSocket connection."""
+        """Send raw PCM-16 LE bytes to the open WebSocket connection.
+
+        Audio that arrives while the socket is still connecting (DNS/TLS
+        handshake, ~1s) is buffered instead of dropped: losing the opening
+        second makes Deepgram start mid-sentence, and its endpointing may then
+        never fire a final result. The buffer is flushed from ``_on_open``.
+        """
         with self._conn_lock:
             conn = self._connection
+            if conn is None and self._running and len(self._pending_audio) < 200:
+                self._pending_audio.append(audio_bytes)
+                return
         if conn is not None and self._running:
             try:
                 conn.send_media(audio_bytes)
@@ -214,6 +228,7 @@ class DeepgramWSClient:
 
         with self._conn_lock:
             self._connection = None
+            self._pending_audio = []
 
         self._client = None
         self._reset_utterance_state(clear_context=True)
@@ -238,6 +253,7 @@ class DeepgramWSClient:
             self._current_segments.clear()
             self._last_preview_source = ""
             self._last_final_source = ""
+            self._last_interim = ""
             if clear_context:
                 self._recent_context.clear()
 
@@ -334,9 +350,6 @@ class DeepgramWSClient:
             if not job.is_final and job.job_id != self._latest_preview_job_id:
                 continue
 
-            if job.is_final and job.job_id != self._latest_final_job_id:
-                continue
-
             translated = job.text
 
             if self.translator is not None:
@@ -355,9 +368,6 @@ class DeepgramWSClient:
                 continue
 
             if not job.is_final and job.job_id != self._latest_preview_job_id:
-                continue
-
-            if job.is_final and job.job_id != self._latest_final_job_id:
                 continue
 
             if self.publisher is not None:
@@ -530,6 +540,21 @@ class DeepgramWSClient:
 
         return self._split_rolling_prefix(normalized)
 
+    def _emit_interim(self, transcript: str, confidence: float) -> None:
+        """Publish an interim transcript as a rolling (non-final) preview."""
+        normalized = transcript.strip()
+        if not normalized or not self.streaming_mode:
+            return
+        if normalized == self._last_interim:
+            return
+        self._last_interim = normalized
+        self._enqueue_translation(
+            normalized,
+            confidence=confidence,
+            is_final=False,
+            context=self._build_context(),
+        )
+
     def _emit_preview_or_finalize(
         self,
         transcript: str,
@@ -632,11 +657,27 @@ class DeepgramWSClient:
 
     def _on_open(self, *args, **kwargs) -> None:
         print("[Deepgram] WebSocket connected — SDK v6 active.")
+        # Flush audio buffered while the socket was connecting.
+        with self._conn_lock:
+            pending = self._pending_audio
+            self._pending_audio = []
+            conn = self._connection
+        if conn is not None and pending:
+            for chunk in pending:
+                try:
+                    conn.send_media(chunk)
+                except Exception as exc:
+                    print(f"[Deepgram] Audio send error (flush): {exc}")
+            print(f"[Deepgram] Flushed {len(pending)} buffered audio chunks.")
 
     def _on_message(self, *args, **kwargs) -> None:
         """
-        Called for every server message. We intentionally ignore unstable interim
-        frames and only emit previews from finalized segments.
+        Called for every server message. Interim and finalized Results are both
+        fed through the soft-commit pipeline: stable prefixes become committed
+        subtitles and the live tail becomes a rolling preview. Deepgram's
+        endpointing may not finalize for long stretches (continuous speech or
+        streams joined mid-sentence), so dropping every interim would leave the
+        client silent for minutes.
         """
         try:
             message = args[0] if args else kwargs.get("message")
@@ -664,14 +705,19 @@ class DeepgramWSClient:
             if not transcript:
                 return
 
-            if not getattr(message, "is_final", False):
-                # Interims are intentionally ignored; they are too unstable for
-                # meaningful Turkish subtitles and create churn.
-                return
-
             confidence = getattr(first_alternative, "confidence", 0.0)
             speech_final = bool(getattr(message, "speech_final", False))
             words = list(getattr(first_alternative, "words", []) or [])
+
+            if not getattr(message, "is_final", False):
+                # Live preview path: Deepgram may not finalize for long
+                # stretches (continuous speech, mid-stream joins), so interim
+                # transcripts become rolling previews instead of being dropped.
+                # Only the newest interim is ever translated — the job queue
+                # discards stale ones — keeping translation cost proportional
+                # to real speech rather than to interim frequency.
+                self._emit_interim(transcript, confidence)
+                return
 
             self._emit_preview_or_finalize(
                 transcript=transcript,
