@@ -53,6 +53,7 @@ ios/App/*.xcworkspace/xcuserdata/
 ios/App/*.xcodeproj/xcuserdata/
 DerivedData/
 ios/App/DerivedData/
+ios/App/DerivedData-Device/
 
 # Environment
 .env
