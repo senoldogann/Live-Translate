@@ -17,8 +17,18 @@ final class SampleHandler: RPBroadcastSampleHandler {
     private let client = LTSClient()
     private let converter = BroadcastAudioConverter()
     private var isConnected = false
+    private var totalCalls = 0
+    private var videoCalls = 0
+    private var audioAppCalls = 0
+    private var audioMicCalls = 0
+    private var otherCalls = 0
+    private var audioAppConnectedCalls = 0
+    private var convertFailures = 0
 
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
+        // Diagnostics: prove the extension actually starts.
+        writeDebug("broadcastStarted (config=\(SharedLTSConfig.isConfigured), url=\(SharedLTSConfig.serverURL))")
+
         // Defer everything to this callback — the user may cancel the system
         // picker's countdown before the broadcast actually starts.
         guard SharedLTSConfig.isConfigured else {
@@ -27,7 +37,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
         }
 
         converter.reset()
-        client.onSegment = { [weak self] segment in
+        client.onSegment = { segment in
             // Relay to the main app through the App Group container.
             SegmentRelay.append(RelaySegment(segment: segment))
         }
@@ -47,23 +57,42 @@ final class SampleHandler: RPBroadcastSampleHandler {
         )
         isConnected = true
         SharedLTSConfig.isBroadcasting = true
-        SegmentRelay.postBroadcastStarted()
+        // Clear any segments left over from a previous session BEFORE waking the
+        // app — otherwise the app races the clear and replays stale subtitles.
         SegmentRelay.clear()
+        SegmentRelay.postBroadcastStarted()
     }
 
     override func processSampleBuffer(_ sampleBuffer: CMSampleBuffer, with sampleBufferType: RPSampleBufferType) {
-        // Only forward system/app audio (not the mic — the user picks which
-        // audio source via the system picker's mic toggle).
-        guard sampleBufferType == .audioApp, isConnected else { return }
-        autoreleasepool {
-            if let pcm = converter.convert(sampleBuffer) {
-                client.sendPCMBytes(pcm)
+        // TEMP DEBUG: count EVERY buffer type so we can tell whether ReplayKit
+        // is delivering video, mic audio, or app audio at all.
+        totalCalls += 1
+        switch sampleBufferType {
+        case .video: videoCalls += 1
+        case .audioApp: audioAppCalls += 1
+        case .audioMic: audioMicCalls += 1
+        @unknown default: otherCalls += 1
+        }
+        if sampleBufferType == .audioApp && isConnected {
+            audioAppConnectedCalls += 1
+            autoreleasepool {
+                if let pcm = converter.convert(sampleBuffer) {
+                    client.sendPCMBytes(pcm)
+                } else {
+                    convertFailures += 1
+                }
             }
+        }
+        // Rate-limited diagnostics: every 30 buffers (≈ every ~0.3-1s of
+        // capture) write the counters so the app shows what is arriving.
+        if totalCalls % 30 == 1 {
+            writeDebug("buf total=\(totalCalls) video=\(videoCalls) app=\(audioAppCalls) mic=\(audioMicCalls) convFail=\(convertFailures) sent=\(audioAppConnectedCalls - convertFailures)")
         }
     }
 
     override func broadcastPaused() {
         client.disconnect()
+        isConnected = false
     }
 
     override func broadcastResumed() {
@@ -82,6 +111,14 @@ final class SampleHandler: RPBroadcastSampleHandler {
         isConnected = false
         SharedLTSConfig.isBroadcasting = false
         SegmentRelay.postBroadcastFinished()
+    }
+
+    /// Writes a diagnostics line to the App Group so the main app (🩺) can show
+    /// what the extension is doing. Uses the dedicated debug channel so routine
+    /// counters are never surfaced as failures in the main UI.
+    private func writeDebug(_ message: String) {
+        DebugLog.shared.log("[ext] \(message)")
+        SharedLTSConfig.debugLine = message
     }
 
     /// Writes the error to the App Group (read by the main app) and terminates

@@ -19,8 +19,12 @@ final class BroadcastMonitor: ObservableObject {
     let pip = PipSubtitleController()
 
     private let model: LiveSubtitleModel
-    private var observer: NSObjectProtocol?
+    private var observerToken: UnsafeMutableRawPointer?
     private var pollTask: Task<Void, Never>?
+    private var lastDiag: String?
+    /// Byte offset of the last consumed relay line (append-only log).
+    private var relayOffset = 0
+    private var lastEmptyLogTime = Date.distantPast
 
     init(model: LiveSubtitleModel) {
         self.model = model
@@ -28,8 +32,13 @@ final class BroadcastMonitor: ObservableObject {
     }
 
     deinit {
-        if let observer {
-            NotificationCenter.default.removeObserver(observer)
+        if let token = observerToken {
+            CFNotificationCenterRemoveObserver(
+                CFNotificationCenterGetDarwinNotifyCenter(),
+                token,
+                nil,
+                nil
+            )
         }
     }
 
@@ -50,31 +59,25 @@ final class BroadcastMonitor: ObservableObject {
                 monitor.handleDarwin(raw)
             }
         }
-        let observer = Unmanaged.passUnretained(self).toOpaque()
-        CFNotificationCenterAddObserver(
-            center,
-            observer,
-            callback,
-            SegmentRelay.didAppendNotification as CFString,
-            nil,
-            .deliverImmediately
-        )
-        CFNotificationCenterAddObserver(
-            center,
-            observer,
-            callback,
-            SegmentRelay.broadcastStartedNotification as CFString,
-            nil,
-            .deliverImmediately
-        )
-        CFNotificationCenterAddObserver(
-            center,
-            observer,
-            callback,
-            SegmentRelay.broadcastFinishedNotification as CFString,
-            nil,
-            .deliverImmediately
-        )
+        // The token is unretained: BroadcastMonitor is owned by the app's
+        // SubtitleViewModel for the whole app lifetime, so the observer is never
+        // dangling. Kept to remove it cleanly in deinit.
+        let token = Unmanaged.passUnretained(self).toOpaque()
+        observerToken = token
+        for name in [
+            SegmentRelay.didAppendNotification,
+            SegmentRelay.broadcastStartedNotification,
+            SegmentRelay.broadcastFinishedNotification,
+        ] {
+            CFNotificationCenterAddObserver(
+                center,
+                token,
+                callback,
+                name as CFString,
+                nil,
+                .deliverImmediately
+            )
+        }
     }
 
     private func handleDarwin(_ name: String) {
@@ -86,6 +89,7 @@ final class BroadcastMonitor: ObservableObject {
             isBroadcasting = true
             model.start()
             pip.start()
+            relayOffset = 0
             startPolling()
         case SegmentRelay.broadcastFinishedNotification:
             stopBroadcast()
@@ -102,14 +106,27 @@ final class BroadcastMonitor: ObservableObject {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 250_000_000) // 4 Hz
                 await self?.drainRelay()
+                // Surface the extension's live diagnostics (written to the App
+                // Group by the debug build) while broadcasting.
+                let diag = SharedLTSConfig.debugLine
+                if !diag.isEmpty, diag != self?.lastDiag {
+                    self?.lastDiag = diag
+                    DebugLog.shared.log("[ext] \(diag)")
+                }
             }
         }
     }
 
     private func drainRelay() {
-        let segments = SegmentRelay.readAll()
+        let (segments, newOffset) = SegmentRelay.readNew(from: relayOffset)
+        relayOffset = newOffset
         if segments.isEmpty {
+            // Rate-limit: 4 Hz of identical lines drown the diagnostics buffer.
+            let now = Date()
+            guard now.timeIntervalSince(lastEmptyLogTime) > 2.0 else { return }
+            lastEmptyLogTime = now
             DebugLog.shared.log("yayın köprüsü: segment yok (henüz altyazı yok)")
+            return
         }
         for segment in segments {
             DebugLog.shared.log("yayın segmenti: '\(segment.original)' (final=\(segment.isFinal))")

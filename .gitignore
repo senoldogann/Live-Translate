@@ -54,6 +54,7 @@ ios/App/*.xcodeproj/xcuserdata/
 DerivedData/
 ios/App/DerivedData/
 ios/App/DerivedData-Device/
+ios/App/DerivedData-Review/
 
 # Environment
 .env

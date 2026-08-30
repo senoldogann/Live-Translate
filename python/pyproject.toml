@@ -5,6 +5,19 @@ requires-python = ">=3.11"
 
 # Runtime bagimliliklari requirements.txt yonetir; bu dosya arac ve kalite ayarlarini merkezlestirir.
 
+[tool.pytest.ini_options]
+# Mirrors the CI test matrix; test_engine.py needs ZMQ_AUTH_TOKEN + a live
+# engine channel, so it stays out of the default run (run explicitly when
+# needed). pysa/ is a vendored site-packages copy, never test code.
+testpaths = [
+    "test_engine_unit.py",
+    "test_translation_terms.py",
+    "test_azure_integration.py",
+    "test_deepgram_buffering.py",
+    "test_lts_server.py",
+]
+norecursedirs = ["pysa", ".venv", ".pytest_cache", "__pycache__", "*.egg-info"]
+
 [tool.ruff]
 target-version = "py311"
 line-length = 120

@@ -56,4 +56,47 @@ final class SegmentRelayTests: XCTestCase {
         XCTAssertEqual(SegmentRelay.fileName, "lts_segments.jsonl")
         XCTAssertEqual(SegmentRelay.didAppendNotification, "com.stealth.lts.segments.didAppend")
     }
+
+    func testReadNewConsumesOnlyAppendedLines() {
+        let encoder = JSONEncoder()
+        func line(_ original: String, _ isFinal: Bool) -> Data {
+            var data = try! encoder.encode(RelaySegment(original: original, translated: "", isFinal: isFinal))
+            data.append(Data("\n".utf8))
+            return data
+        }
+        var data = Data()
+        data.append(line("bir", true))
+        data.append(line("iki", true))
+
+        let (first, offset1) = SegmentRelay.readNew(from: 0, data: data)
+        XCTAssertEqual(first.map(\.original), ["bir", "iki"])
+        XCTAssertEqual(offset1, data.count)
+
+        // Append two more lines; reading from offset1 yields only the new ones.
+        data.append(line("üç", false))
+        data.append(line("dört", true))
+        let (second, offset2) = SegmentRelay.readNew(from: offset1, data: data)
+        XCTAssertEqual(second.map(\.original), ["üç", "dört"])
+        XCTAssertEqual(offset2, data.count)
+    }
+
+    func testReadNewWaitsForPartialTrailingLine() {
+        let encoder = JSONEncoder()
+        var complete = try! encoder.encode(RelaySegment(original: "tam", translated: "", isFinal: true))
+        complete.append(Data("\n".utf8))
+        // A line the extension is still writing (no trailing newline yet).
+        let partial = "{\"original\":\"yaz\"".data(using: .utf8)!
+        let data = complete + partial
+
+        let (segments, newOffset) = SegmentRelay.readNew(from: 0, data: data)
+        // Only the complete line is consumed; the partial line stays pending.
+        XCTAssertEqual(segments.map(\.original), ["tam"])
+        XCTAssertEqual(newOffset, complete.count)
+    }
+
+    func testReadNewBeyondEOFClampsToEnd() {
+        let (segments, newOffset) = SegmentRelay.readNew(from: 999, data: Data())
+        XCTAssertTrue(segments.isEmpty)
+        XCTAssertEqual(newOffset, 0)
+    }
 }

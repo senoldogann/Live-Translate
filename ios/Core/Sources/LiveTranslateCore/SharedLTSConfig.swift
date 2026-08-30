@@ -16,6 +16,9 @@ public enum SharedLTSConfig {
     static let keyTargetLang = "lts.targetLang"
     static let keyBroadcastStatus = "lts.broadcastStatus" // "idle" | "broadcasting"
     static let keyLastError = "lts.lastError"
+    // Extension diagnostics (rate-limited counters) — distinct from lastError
+    // so routine debug lines are never surfaced as failures in the UI.
+    static let keyDebugLine = "lts.debugLine"
 
     public static var defaults: UserDefaults? {
         UserDefaults(suiteName: appGroupID)
@@ -53,6 +56,14 @@ public enum SharedLTSConfig {
     public static var lastError: String? {
         get { defaults?.string(forKey: keyLastError) }
         set { defaults?.set(newValue, forKey: keyLastError) }
+    }
+
+    /// Latest extension diagnostics line (e.g. per-buffer counters), shown only
+    /// in the 🩺 diagnostics screen. Kept separate from `lastError` so routine
+    /// counters never masquerade as failures in the main UI.
+    public static var debugLine: String {
+        get { defaults?.string(forKey: keyDebugLine) ?? "" }
+        set { defaults?.set(newValue, forKey: keyDebugLine) }
     }
 
     /// True when a server URL has been configured (the LTS client can connect).
