@@ -50,7 +50,11 @@ final class LTSClientIntegrationTests: XCTestCase {
             model: "base"
         )
 
-        await fulfillment(of: [readyExpectation], timeout: 10)
+        // Generous timeouts: on cold CI runners the simulator app launch +
+        // WebSocket handshake alone can take >10s, which has caused flaky
+        // failures on doc-only PRs. 45s leaves headroom without hiding a
+        // genuinely dead server (the isConnected guard below still skips).
+        await fulfillment(of: [readyExpectation], timeout: 45)
         guard client.isConnected else {
             // Server not reachable (e.g. local run without the fake server) —
             // skip instead of failing the whole suite.
@@ -59,7 +63,7 @@ final class LTSClientIntegrationTests: XCTestCase {
         }
 
         client.sendPCMBytes(loudPCM())
-        await fulfillment(of: [segmentExpectation], timeout: 10)
+        await fulfillment(of: [segmentExpectation], timeout: 15)
 
         client.disconnect()
     }
