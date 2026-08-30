@@ -30,8 +30,8 @@ class FakeTranscriber:
     def load(self):
         pass
 
-    def transcribe(self, audio, sample_rate, prompt=""):
-        self.calls.append({"samples": int(audio.size), "prompt": prompt})
+    def transcribe(self, audio, sample_rate, prompt="", language=None):
+        self.calls.append({"samples": int(audio.size), "prompt": prompt, "language": language})
         return self.text, self.confidence, self.lang
 
 
@@ -196,6 +196,32 @@ class LTSSessionTests(unittest.TestCase):
         session.source_lang = "auto"
         session.feed_samples(loud_chunk(0.5), now=100.4)
         self.assertEqual(len(session.tick(now=100.6)), 1)
+
+    def test_source_lang_passed_to_transcriber(self):
+        transcriber = FakeTranscriber()
+        session = LTSSession(
+            transcriber=transcriber,
+            translator=FakeTranslator(),
+            source_lang="en",
+            target_lang="tr",
+            vad=EnergyVAD(),
+        )
+        session.feed_samples(loud_chunk(0.5), now=100.0)
+        session.tick(now=100.2)
+        self.assertEqual(transcriber.calls[-1]["language"], "en")
+
+    def test_auto_lang_passes_none(self):
+        transcriber = FakeTranscriber()
+        session = LTSSession(
+            transcriber=transcriber,
+            translator=FakeTranslator(),
+            source_lang="auto",
+            target_lang="tr",
+            vad=EnergyVAD(),
+        )
+        session.feed_samples(loud_chunk(0.5), now=100.0)
+        session.tick(now=100.2)
+        self.assertIsNone(transcriber.calls[-1]["language"])
 
     def test_context_used_as_prompt(self):
         transcriber = FakeTranscriber()

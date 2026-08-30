@@ -438,9 +438,20 @@ class TranscriptionEngine:
             print(f"[Whisper] Failed to load model: {e}")
             raise
 
-    def transcribe(self, audio: np.ndarray, sample_rate: int = 16000, prompt: str = "") -> tuple[str, float, str]:
+    def transcribe(
+        self,
+        audio: np.ndarray,
+        sample_rate: int = 16000,
+        prompt: str = "",
+        language: str | None = None,
+    ) -> tuple[str, float, str]:
         """
         Transcribe audio to text with language detection.
+
+        ``language`` overrides the engine's configured language for this call
+        (``None``/``"auto"`` falls back to ``self.language``). This lets a server
+        honor per-client language preferences without reloading the model.
+
         Returns (text, confidence, detected_language)
         """
         if self.model is None:
@@ -448,7 +459,10 @@ class TranscriptionEngine:
 
         try:
             # Use None for auto-detection, or specific language if set
-            lang_param = None if self.language == "auto" else self.language
+            if language in (None, "", "auto"):
+                lang_param = None if self.language == "auto" else self.language
+            else:
+                lang_param = language
 
             segments, info = self.model.transcribe(
                 audio,

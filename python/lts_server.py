@@ -27,6 +27,7 @@ import argparse
 import asyncio
 import json
 import os
+import secrets
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -195,7 +196,13 @@ class LTSSession:
         if not is_final and not self.streaming:
             return []
 
-        text, confidence, detected_lang = self.transcriber.transcribe(audio, SAMPLE_RATE, prompt=self.last_context)
+        # Honor the client's source language (auto → detect). The shared
+        # transcriber is constructed with the server default, so the per-call
+        # override is what makes per-client languages actually take effect.
+        lang = None if self.source_lang in ("auto", "") else self.source_lang
+        text, confidence, detected_lang = self.transcriber.transcribe(
+            audio, SAMPLE_RATE, prompt=self.last_context, language=lang
+        )
         text = (text or "").strip()
         if not text:
             if is_final:
@@ -326,7 +333,7 @@ class LTSServer:
             if cfg.get("type") != "config":
                 await websocket.send(json.dumps({"type": "error", "message": "expected config message"}))
                 return
-            if self.config.api_key and cfg.get("apiKey") != self.config.api_key:
+            if self.config.api_key and not secrets.compare_digest(cfg.get("apiKey", ""), self.config.api_key):
                 await websocket.send(json.dumps({"type": "error", "message": "unauthorized"}))
                 return
 
@@ -378,8 +385,10 @@ class LTSServer:
         except websockets.ConnectionClosed:
             pass
         except Exception as exc:
+            # Log the real cause server-side; never leak internals to clients.
+            print(f"[LTS] handler error: {exc!r}", flush=True)
             try:
-                await websocket.send(json.dumps({"type": "error", "message": str(exc)}))
+                await websocket.send(json.dumps({"type": "error", "message": "internal error"}))
             except websockets.ConnectionClosed:
                 pass
 
