@@ -12,15 +12,14 @@ segments into stable Turkish output. This client now:
 4. Drops stale preview translations when fresher segments arrive.
 """
 
+from __future__ import annotations
+
 import os
 import threading
 import time
 from collections import deque
 from dataclasses import dataclass
 from queue import Empty, Queue
-
-from deepgram import DeepgramClient
-from deepgram.core.events import EventType
 
 
 @dataclass
@@ -48,7 +47,9 @@ class DeepgramWSClient:
         self.streaming_mode: bool = False
 
         self._running: bool = False
-        self._client: DeepgramClient | None = None
+        # The Deepgram SDK is lazy-imported in start(); with ``from __future__
+        # import annotations`` the local annotation is never evaluated.
+        self._client: DeepgramClient | None = None  # noqa: F821
         # Protected by _conn_lock; written from daemon thread, read from audio thread
         self._connection = None
         self._conn_lock = threading.Lock()
@@ -120,6 +121,10 @@ class DeepgramWSClient:
         self.source_lang = language
         self._running = True
         self._last_audio_sent_at = time.monotonic()
+        # Lazy import: the SDK is only needed when the Deepgram backend is used;
+        # module-level import would force it on consumers like the LTS server.
+        from deepgram import DeepgramClient
+
         self._client = DeepgramClient(api_key=self.api_key)
         self._translation_queue = Queue()
         self._job_counter = 0
@@ -275,6 +280,8 @@ class DeepgramWSClient:
             ) as connection:
                 with self._conn_lock:
                     self._connection = connection
+
+                from deepgram.core.events import EventType
 
                 connection.on(EventType.OPEN, self._on_open)
                 connection.on(EventType.MESSAGE, self._on_message)

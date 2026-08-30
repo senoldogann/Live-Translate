@@ -41,7 +41,6 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / ".env")
 
 import numpy as np
-import zmq
 
 # Lazy imports for faster startup
 _whisper_model = None
@@ -1053,6 +1052,10 @@ class SubtitleEngine:
 
         # Command Listener (Config updates)
         self._command_thread: threading.Thread | None = None
+        # Lazy import: ZMQ is only needed by the desktop app, not by consumers
+        # like the LTS server that import this module.
+        import zmq
+
         self._command_context = zmq.Context()
         self._command_socket = self._command_context.socket(zmq.SUB)
         self._command_socket.connect(config.command_address)
