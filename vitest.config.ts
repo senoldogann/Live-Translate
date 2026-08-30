@@ -11,8 +11,11 @@ export default defineConfig({
         setupFiles: './src/test/setup.ts',
         css: true,
         // Yerel worktree kopyalari ana depodaki node_modules ile cakisiyor;
-        // CI'da ve yerelde yalnizca ana depodaki testler calismali.
-        exclude: [...configDefaults.exclude, '.worktrees/**', 'e2e/**'],
+        // CI'da ve yerelde yalnizca ana depodaki testler calismali. ios/**
+        // gitignore'lanmış vendored whisper.cpp'yi içerir — vitest onu taramaz
+        // (Swift testleri zaten ayrı çalışır); aksi halde yerel `npm test`
+        // build edilmemiş native addon testi yüzünden kırmızı yanar.
+        exclude: [...configDefaults.exclude, '.worktrees/**', 'e2e/**', 'ios/**'],
         coverage: {
             provider: 'v8',
             reporter: ['text', 'lcov'],
