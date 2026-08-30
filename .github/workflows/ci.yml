@@ -139,7 +139,7 @@ jobs:
       - name: App pipeline tests (simulator)
         run: |
           DEST=$(xcrun simctl list devices available -j | python3 -c \
-            "import json,sys; d=json.load(sys.stdin); devs=[n for rt in d['devices'].values() for n,info in rt.items() if info.get('isAvailable')]; print('platform=iOS Simulator,name=' + sorted(devs)[-1] if devs else '')")
+            "import json,sys; d=json.load(sys.stdin); devs=[info['name'] for rt in d['devices'].values() for info in rt if info.get('isAvailable')]; print('platform=iOS Simulator,name=' + sorted(devs)[-1] if devs else '')")
           xcodebuild test -project ios/App/StealthSubtitleTranslator.xcodeproj \
             -scheme StealthSubtitleTranslator -destination "$DEST" \
             -derivedDataPath ios/App/DerivedData
