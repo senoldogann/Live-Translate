@@ -41,6 +41,7 @@ ios/
 │   │   ├── PCMUtils.swift             # mono mix / resample / RMS / int16→float
 │   │   ├── VoiceActivityDetector.swift# enerji tabanlı VAD (engine.py fallback portu)
 │   │   ├── AdaptiveVoiceActivityDetector.swift # gürültü tabanını izleyen uyarlamalı VAD
+│   │   ├── TranscriptionScheduler.swift # akış zamanlama kararları (partial/final, min-yeni-ses)
 │   │   ├── LTSClient.swift            # WS istemcisi (app + extension ortak kullanır)
 │   │   ├── SharedLTSConfig.swift      # app group üzerinden paylaşılan sunucu ayarları
 │   │   └── SegmentRelay.swift         # extension→app JSONL segment köprüsü

@@ -74,6 +74,17 @@ Mevcut macOS çekirdeği (engine.py) çok platformlu sunucuda yeniden kullanıl�
 
 **Çıkış:** App Store'a gönderilebilir v1.0.
 
+### Faz 4.5 — Akış kalitesi: adaptif VAD + akış zamanlama (tamamlandı)
+
+- [x] **4.5.1** Adaptif VAD — gürültü tabanı takibi (`AdaptiveVoiceActivityDetector`, 6 test)
+- [x] **4.5.2** `TranscriptionScheduler` — pure timing kararları (partial/final, min-yeni-ses
+  0.5s, aynı kuyruk penceresini yeniden transkript etmeme) — 11 test
+- [x] **4.5.3** Dil algılama bir kez (otomatik modda ilk sonuçta pinlenir, `detectLanguage`
+  sonraki geçişlerde kapalı) — cihazda ~2x inference maliyetini düşürür
+- [x] **4.5.4** `STTEngine.transcribe` sadeleştirildi (`runFull` helper, `detectLanguage` param)
+
+**Çıkış:** Streaming pipeline'ı CPU/pil verimli ve deterministik (Core'da 70 test).
+
 ## Bağımlılıklar
 
 ```

@@ -127,7 +127,15 @@ public final class STTEngine {
     ///   - samples: Mono Float32 samples in [-1, 1] at 16 kHz.
     ///   - language: ISO language code (e.g. "en", "tr") or `nil` for auto-detection.
     ///   - prompt: Previous final sentence used as decoder context (improves consistency).
-    public func transcribe(samples: [Float], language: String?, prompt: String?) -> Result<TranscriptionResult, EngineError> {
+    ///   - detectLanguage: Whether to run whisper's language-detection pass.
+    ///     Detection is a full extra inference — callers should pin the language
+    ///     after the first result instead of detecting on every cycle.
+    public func transcribe(
+        samples: [Float],
+        language: String?,
+        prompt: String?,
+        detectLanguage: Bool = true
+    ) -> Result<TranscriptionResult, EngineError> {
         queue.sync {
             guard let ctx = context, !samples.isEmpty else {
                 return .failure(isLoaded ? .transcriptionFailed : .modelNotFound)
@@ -143,34 +151,54 @@ public final class STTEngine {
             params.single_segment = true
             params.token_timestamps = true
             params.n_threads = Int32(threads)
-            params.detect_language = (language == nil)
+            // Detection only makes sense when no language was provided.
+            params.detect_language = detectLanguage && language == nil
 
-            return samples.withUnsafeBufferPointer { samplesPtr in
-                let status = language.flatMap { lang in
-                    lang.withCString { langPtr in
-                        params.language = langPtr
-                        if let prompt, !prompt.isEmpty {
-                            return prompt.withCString { promptPtr in
-                                params.initial_prompt = promptPtr
-                                return whisper_full(ctx, params, samplesPtr.baseAddress, Int32(samplesPtr.count))
-                            }
-                        }
-                        return whisper_full(ctx, params, samplesPtr.baseAddress, Int32(samplesPtr.count))
-                    }
-                } ?? {
-                    if let prompt, !prompt.isEmpty {
-                        return prompt.withCString { promptPtr in
-                            params.initial_prompt = promptPtr
-                            return whisper_full(ctx, params, samplesPtr.baseAddress, Int32(samplesPtr.count))
-                        }
-                    }
-                    return whisper_full(ctx, params, samplesPtr.baseAddress, Int32(samplesPtr.count))
-                }()
+            let status = samples.withUnsafeBufferPointer { samplesPtr in
+                runFull(ctx, params, samples: samplesPtr, language: language, prompt: prompt)
+            }
+            guard status == 0 else { return .failure(.transcriptionFailed) }
+            return .success(extractResult(from: ctx))
+        }
+    }
 
-                guard status == 0 else { return .failure(.transcriptionFailed) }
-                return .success(extractResult(from: ctx))
+    /// Calls `whisper_full`, pinning the optional `language`/`prompt` C strings
+    /// for the duration of the call (whisper reads them only while running).
+    private func runFull(
+        _ ctx: OpaquePointer,
+        _ params: whisper_full_params,
+        samples: UnsafeBufferPointer<Float>,
+        language: String?,
+        prompt: String?
+    ) -> Int32 {
+        let prompt = (prompt?.isEmpty == false) ? prompt : nil
+        let nSamples = Int32(samples.count)
+
+        if let language, let prompt {
+            return language.withCString { langPtr in
+                var p = params
+                p.language = langPtr
+                return prompt.withCString { promptPtr in
+                    p.initial_prompt = promptPtr
+                    return whisper_full(ctx, p, samples.baseAddress, nSamples)
+                }
             }
         }
+        if let language {
+            return language.withCString { langPtr in
+                var p = params
+                p.language = langPtr
+                return whisper_full(ctx, p, samples.baseAddress, nSamples)
+            }
+        }
+        if let prompt {
+            return prompt.withCString { promptPtr in
+                var p = params
+                p.initial_prompt = promptPtr
+                return whisper_full(ctx, p, samples.baseAddress, nSamples)
+            }
+        }
+        return whisper_full(ctx, params, samples.baseAddress, nSamples)
     }
 
     // MARK: - Result extraction
