@@ -39,7 +39,7 @@ xcrun stapler validate "release/Stealth-Subtitle-Translator-1.0.0-arm64.dmg"
 
 ```bash
 xcrun notarytool store-credentials "notarytool" \
-  --apple-id "senoldogan02@icloud.com" \
+  --apple-id "YOU@ICLOUD.COM" \
   --team-id "79DZ4AA4DW" \
   --password "XXXX-XXXX-XXXX-XXXX"
 ```
