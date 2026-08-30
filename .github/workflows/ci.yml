@@ -60,6 +60,7 @@ jobs:
         run: |
           python -m pytest test_engine_unit.py test_translation_terms.py \
             test_azure_integration.py test_deepgram_buffering.py test_lts_server.py \
+            test_server_requirements.py \
             --cov=engine --cov=azure_translation_engine --cov=deepgram_engine \
             --cov=lts_server \
             --cov-report=term-missing --cov-fail-under=35
