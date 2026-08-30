@@ -143,7 +143,7 @@ jobs:
         run: |
           # venv avoids PEP 668 externally-managed pip on the macOS runner.
           python3 -m venv /tmp/lts-venv
-          /tmp/lts-venv/bin/pip install -q websockets numpy
+          /tmp/lts-venv/bin/pip install -q -r python/requirements-server.txt
           # Real LTSServer + fake transcriber/translator/VAD for the Swift
           # LTSClient integration test (same wire protocol as production).
           /tmp/lts-venv/bin/python scripts/lts_fake_server.py --port 8765 > /tmp/lts-fake.log 2>&1 &
