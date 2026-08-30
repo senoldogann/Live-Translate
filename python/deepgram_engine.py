@@ -47,7 +47,9 @@ class DeepgramWSClient:
         self.streaming_mode: bool = False
 
         self._running: bool = False
-        self._client: DeepgramClient | None = None
+        # The Deepgram SDK is lazy-imported in start(); with ``from __future__
+        # import annotations`` the local annotation is never evaluated.
+        self._client: DeepgramClient | None = None  # noqa: F821
         # Protected by _conn_lock; written from daemon thread, read from audio thread
         self._connection = None
         self._conn_lock = threading.Lock()
