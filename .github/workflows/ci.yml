@@ -117,3 +117,29 @@ jobs:
 
       - name: Run Ruff formatter check
         run: ruff format --check --config python/pyproject.toml python
+
+  ios-tests:
+    name: iOS Tests
+    runs-on: macos-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Core Swift tests (headless)
+        run: cd ios/Core && swift test
+
+      - name: Generate Xcode project
+        run: cd ios/App && xcodegen generate
+
+      - name: App pipeline tests (simulator)
+        run: |
+          DEST=$(xcrun simctl list devices available -j | python3 -c \
+            "import json,sys; d=json.load(sys.stdin); devs=[n for rt in d['devices'].values() for n,info in rt.items() if info.get('isAvailable')]; print('platform=iOS Simulator,name=' + sorted(devs)[-1] if devs else '')")
+          xcodebuild test -project ios/App/StealthSubtitleTranslator.xcodeproj \
+            -scheme StealthSubtitleTranslator -destination "$DEST" \
+            -derivedDataPath ios/App/DerivedData
