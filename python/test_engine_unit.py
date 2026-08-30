@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from engine import (
     EngineConfig,
     SubtitleEngine,
+    TranscriptionEngine,
     VoiceActivityDetector,
     ZmqPublisher,
     _ends_with_sentence_punctuation,
@@ -218,6 +219,52 @@ class EngineInitTokenTests(unittest.TestCase):
         os.environ.pop("ZMQ_AUTH_TOKEN", None)
         with self.assertRaises(RuntimeError):
             SubtitleEngine(config)
+
+
+class TranscriptionEngineLanguageTests(unittest.TestCase):
+    """Per-call language override in ``TranscriptionEngine.transcribe``.
+
+    The LTS server shares one transcriber across clients and must honor each
+    client's source language without reloading the model.
+    """
+
+    class FakeModel:
+        def __init__(self):
+            self.calls = []
+
+        def transcribe(self, audio, **kwargs):
+            self.calls.append(kwargs)
+
+            class Segment:
+                text = "Merhaba."
+                avg_logprob = -0.5
+
+            class Info:
+                language = "tr"
+
+            return [Segment()], Info()
+
+    def _engine(self, language: str) -> TranscriptionEngine:
+        engine = TranscriptionEngine(language=language)
+        engine.model = self.FakeModel()
+        return engine
+
+    def test_per_call_override_wins(self):
+        engine = self._engine(language="en")
+        text, _, detected = engine.transcribe(np.zeros(1600), language="de")
+        self.assertEqual(engine.model.calls[-1]["language"], "de")
+        self.assertEqual(text, "Merhaba.")
+        self.assertEqual(detected, "tr")
+
+    def test_auto_engine_passes_none(self):
+        engine = self._engine(language="auto")
+        engine.transcribe(np.zeros(1600))
+        self.assertIsNone(engine.model.calls[-1]["language"])
+
+    def test_configured_language_used_without_override(self):
+        engine = self._engine(language="en")
+        engine.transcribe(np.zeros(1600))
+        self.assertEqual(engine.model.calls[-1]["language"], "en")
 
 
 if __name__ == "__main__":
