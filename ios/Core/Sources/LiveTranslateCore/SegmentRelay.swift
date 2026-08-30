@@ -106,6 +106,37 @@ public enum SegmentRelay {
         return parse(data)
     }
 
+    /// Reads only the segments appended after `offset` (append-only log
+    /// semantics) and returns the new byte offset to continue from.
+    ///
+    /// The offset advances only past **complete** lines: a line the extension is
+    /// still writing is left pending and picked up on the next read instead of
+    /// being half-parsed and lost. Without this, the main app re-read the whole
+    /// file on every poll, re-applying every final segment — duplicating the
+    /// transcript history and spamming the diagnostics log.
+    public static func readNew(from offset: Int) -> (segments: [RelaySegment], newOffset: Int) {
+        guard let url = fileURL, let data = try? Data(contentsOf: url) else {
+            return ([], offset)
+        }
+        return readNew(from: offset, data: data)
+    }
+
+    /// Data-injected variant so the append-only consumption rules are
+    /// unit-testable without touching the App Group container.
+    static func readNew(from offset: Int, data: Data) -> (segments: [RelaySegment], newOffset: Int) {
+        let start = min(max(offset, 0), data.count)
+        guard start < data.count else { return ([], data.count) }
+
+        let newData = data.subdata(in: start..<data.count)
+        // Consume up to the last "\n" so a trailing partial line stays pending.
+        var consumed = 0
+        if let newline = newData.lastIndex(of: 0x0A) {
+            consumed = newline + 1
+        }
+        let complete = newData.prefix(consumed)
+        return (parse(Data(complete)), start + consumed)
+    }
+
     /// Removes the segment file (used when the broadcast ends).
     public static func clear() {
         guard let url = fileURL else { return }

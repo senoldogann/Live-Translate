@@ -27,6 +27,11 @@ public final class LTSClient {
     public var onError: ((String) -> Void)?
 
     private var task: URLSessionWebSocketTask?
+    // Kept strongly: a URLSession that is only held by its task (and loses its
+    // Swift strong ref when `connect` returns) has its in-flight sends cancelled
+    // with NSURLErrorCancelled — the broadcast's first PCM chunk reached the
+    // server, then the session was released and everything after was dropped.
+    private var session: URLSession?
     private let queue = DispatchQueue(label: "com.stealth.lts.client", qos: .userInitiated)
 
     public init() {}
@@ -50,6 +55,7 @@ public final class LTSClient {
 
         let request = URLRequest(url: url, timeoutInterval: 30)
         let session = URLSession(configuration: .default, delegate: nil, delegateQueue: nil)
+        self.session = session
         let task = session.webSocketTask(with: request)
         self.task = task
         task.resume()
@@ -95,6 +101,7 @@ public final class LTSClient {
     public func disconnect() {
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
+        session = nil
         state = .idle
     }
 
@@ -134,7 +141,6 @@ public final class LTSClient {
                 let isFinal = obj["isFinal"] as? Bool
             else { return }
             let confidence = (obj["confidence"] as? Double) ?? 0
-            let language = (obj["language"] as? String) ?? ""
             let segment = SubtitleSegment(
                 original: original,
                 translated: translated,
