@@ -175,7 +175,7 @@ struct SettingsView: View {
         } header: {
             Text("Bulut & Yayın")
         } footer: {
-            Text("LTS sunucusu, cihaz sesini yazıya döküp çevirir. Yayını başlatmak için ana ekrandaki yayın düğmesini kullanın. Bilgiler kaydedilir ve yayın uzantısıyla paylaşılır.")
+            Text("Video sesi için 3 adım: \(ListeningGuide.broadcastSteps.enumerated().map { "\($0.offset + 1). \($0.element.title): \($0.element.detail)" }.joined(separator: "  •  "))")
         }
         .onAppear {
             ltsServerURL = settings.ltsServerURL

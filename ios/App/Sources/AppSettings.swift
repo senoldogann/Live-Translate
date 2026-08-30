@@ -14,6 +14,7 @@ enum AppSettings {
         static let backgroundOpacity = "settings.backgroundOpacity"
         static let translationProvider = "settings.translationProvider"
         static let autoStartListening = "settings.autoStartListening"
+        static let hasSeenListeningGuide = "settings.hasSeenListeningGuide"
         static let ltsServerURL = "settings.ltsServerURL"
         static let ltsAPIKey = "settings.ltsAPIKey"
     }

@@ -5,6 +5,8 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var showHistory = false
     @State private var showDiagnostics = false
+    @State private var showListeningGuide = false
+    @AppStorage(AppSettings.Key.hasSeenListeningGuide) private var hasSeenListeningGuide = false
 
     var body: some View {
         ZStack {
@@ -51,6 +53,17 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showDiagnostics) {
             DiagnosticsView()
+        }
+        .sheet(isPresented: $showListeningGuide) {
+            ListeningGuideView()
+        }
+        .onAppear {
+            // One-shot: explain the two flows (mic vs broadcast) on first
+            // launch so "Dinleniyor" with no subtitles isn't a mystery.
+            if ListeningGuide.shouldShowFirstLaunchGuide(hasSeenGuide: hasSeenListeningGuide) {
+                showListeningGuide = true
+                hasSeenListeningGuide = true
+            }
         }
     }
 
@@ -104,17 +117,31 @@ struct ContentView: View {
     }
 
     private var statusBar: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(viewModel.isListening ? Color.green : Color.gray)
-                .frame(width: 8, height: 8)
-            Text(statusText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-            if viewModel.isListening && !viewModel.isFinal {
-                ProgressView()
-                    .controlSize(.small)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(viewModel.isListening ? Color.green : Color.gray)
+                    .frame(width: 8, height: 8)
+                Text(statusText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if viewModel.isListening && !viewModel.isFinal {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+            // Mic flow only hears nearby speech; when cloud mode is on and no
+            // broadcast is active, tell the user video audio needs broadcast.
+            if let hint = ListeningGuide.statusHint(
+                isListening: viewModel.isListening,
+                isBroadcasting: viewModel.broadcast.isBroadcasting,
+                translationProvider: viewModel.settings.translationProvider
+            ) {
+                Text(hint)
+                    .font(.caption2)
+                    .foregroundStyle(Color.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.horizontal, 4)
