@@ -15,6 +15,7 @@ testpaths = [
     "test_azure_integration.py",
     "test_deepgram_buffering.py",
     "test_lts_server.py",
+    "test_server_requirements.py",
 ]
 norecursedirs = ["pysa", ".venv", ".pytest_cache", "__pycache__", "*.egg-info"]
 
