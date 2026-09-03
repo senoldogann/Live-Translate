@@ -6,7 +6,7 @@
 # azure_translation_engine remains desktop-only and is not listed here.
 faster-whisper>=1.2.1
 numpy>=2.4.6
-websockets>=17.0.1
+websockets>=17.1
 requests>=2.34.2
 python-dotenv>=1.0.0
 deepgram-sdk>=6.0.0,<7.0.0
