@@ -14,7 +14,7 @@ webrtcvad>=2.0.10
 
 # ── IPC ───────────────────────────────────────────────────────────────────────
 # PyZMQ: ZeroMQ bindings
-pyzmq>=25.0.0
+pyzmq>=27.2.0
 
 # WS API client bindings for cloud implementation 
 websockets>=17.0.1
